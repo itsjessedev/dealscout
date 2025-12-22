@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1084181594792",
+    "project_id": "dealscout-88ed6",
+    "storage_bucket": "dealscout-88ed6.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1084181594792:android:d00d802ca091940b7bf89d",
+        "android_client_info": {
+          "package_name": "com.dealscout.app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyC6KtGb2r7XLAqONavV0r2i_DiSgcrgEkk"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

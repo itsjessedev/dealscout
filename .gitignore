@@ -6,6 +6,7 @@
 # API credentials
 credentials.json
 token.json
+token.pickle
 firebase-service-account.json
 *-service-account.json
 
