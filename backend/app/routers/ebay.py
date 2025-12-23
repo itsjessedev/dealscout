@@ -99,3 +99,22 @@ async def get_current_fee(db: AsyncSession = Depends(get_db)):
     """Get current eBay fee percentage."""
     fee = await ebay_seller.get_current_fee_percentage(db)
     return {"fee_percentage": float(fee)}
+
+
+@router.get("/local-pickup")
+async def search_local_pickup(
+    q: str,
+    condition: str = "used",
+):
+    """
+    Test endpoint: Search for items with local pickup within 100mi of Rickman, TN.
+
+    Example: /ebay/local-pickup?q=RTX+3080&condition=used
+    """
+    from ..services.ebay_lookup import check_local_pickup_available
+
+    result = await check_local_pickup_available(q, condition)
+    if not result:
+        return {"found": False, "message": "No local pickup items found within 100mi"}
+
+    return {"found": True, **result}
