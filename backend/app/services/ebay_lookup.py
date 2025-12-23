@@ -367,3 +367,179 @@ async def get_market_value_with_local(
         market_result["local_pickup"] = local_result
 
     return market_result
+
+
+async def get_part_cost(
+    part_search_term: str,
+    limit: int = 10,
+) -> Optional[dict]:
+    """
+    Search eBay for replacement part pricing.
+
+    Used for repair cost estimation - finds cheapest source for specific parts.
+
+    Args:
+        part_search_term: Specific part to search for (e.g., "iPhone 14 Pro Max screen replacement")
+        limit: Max listings to check
+
+    Returns:
+        Dict with part info including URL to cheapest listing, or None if not found.
+    """
+    token = await get_ebay_access_token()
+    if not token:
+        return None
+
+    # Search variations for parts
+    search_terms = [
+        f"{part_search_term} replacement",
+        part_search_term,
+        f"{part_search_term} repair",
+        f"{part_search_term} OEM",
+    ]
+
+    async with httpx.AsyncClient() as client:
+        for search in search_terms:
+            try:
+                response = await client.get(
+                    EBAY_API_URL,
+                    headers={
+                        "Authorization": f"Bearer {token}",
+                        "X-EBAY-C-MARKETPLACE-ID": "EBAY_US",
+                    },
+                    params={
+                        "q": search,
+                        "filter": "buyingOptions:{FIXED_PRICE},priceCurrency:USD",
+                        "sort": "price",  # Lowest price first
+                        "limit": limit,
+                    },
+                    timeout=10.0,
+                )
+
+                if response.status_code != 200:
+                    continue
+
+                data = response.json()
+                items = data.get("itemSummaries", [])
+
+                if not items:
+                    continue
+
+                # Find cheapest valid listing
+                for item in items:
+                    price_data = item.get("price", {})
+                    if price_data.get("currency") == "USD":
+                        price = float(price_data.get("value", 0))
+                        if price > 0:
+                            item_id = item.get("itemId", "")
+                            return {
+                                "part_name": part_search_term,
+                                "part_cost": price,
+                                "part_url": f"https://www.ebay.com/itm/{item_id}",
+                                "part_title": item.get("title"),
+                                "seller": item.get("seller", {}).get("username"),
+                                "source": "eBay",
+                                "search_term_used": search,
+                            }
+
+            except Exception as e:
+                print(f"Part search error for '{search}': {e}")
+                continue
+
+    return None
+
+
+async def get_parts_market_value(
+    search_term: str,
+    limit: int = 20,
+) -> Optional[dict]:
+    """
+    Look up market value for "for parts/broken" items.
+
+    Used to price items that need repair - compares to other broken/parts listings.
+
+    Args:
+        search_term: Item to search for (e.g., "iPhone 14 Pro Max")
+        limit: Max listings to analyze
+
+    Returns:
+        Dict with parts pricing data or None if not found.
+    """
+    token = await get_ebay_access_token()
+    if not token:
+        return None
+
+    # Search terms for broken/parts items
+    parts_searches = [
+        f"{search_term} for parts",
+        f"{search_term} as-is",
+        f"{search_term} broken",
+        f"{search_term} not working",
+    ]
+
+    async with httpx.AsyncClient() as client:
+        for search in parts_searches:
+            result = await _single_ebay_search(
+                client, token, search, "USED", limit
+            )
+            if result and result.get("num_sales", 0) >= 3:
+                result["parts_listing"] = True
+                result["search_note"] = f"Parts/broken pricing from '{search}'"
+                return result
+
+    return None
+
+
+async def analyze_price_trends(
+    search_term: str,
+    condition: str = "used",
+) -> Optional[dict]:
+    """
+    Simple price trend analysis based on current listings.
+
+    Analyzes price range spread to estimate market stability.
+
+    Returns:
+        Dict with trend indicator and note.
+    """
+    result = await get_market_value(search_term, condition, limit=20)
+    if not result or result.get("num_sales", 0) < 5:
+        return None
+
+    avg_price = result.get("avg_price", 0)
+    low_price = result.get("low_price", 0)
+    high_price = result.get("high_price", 0)
+
+    if avg_price <= 0:
+        return None
+
+    # Calculate price volatility
+    price_range = high_price - low_price
+    volatility = price_range / avg_price
+
+    # Determine trend based on price distribution
+    if volatility < 0.20:
+        # Tight range = stable market
+        trend = "stable"
+        note = f"Consistent pricing around ${avg_price:.0f}"
+    elif low_price > avg_price * 0.85:
+        # Low prices close to average = strong demand
+        trend = "up"
+        note = f"Strong demand, prices ${low_price:.0f}-${high_price:.0f}"
+    elif high_price < avg_price * 1.15:
+        # High prices close to average = softening
+        trend = "down"
+        note = f"Prices softening, ${low_price:.0f}-${high_price:.0f}"
+    else:
+        # Wide range = variable market
+        trend = "stable"
+        note = f"Variable pricing ${low_price:.0f}-${high_price:.0f}"
+
+    return {
+        "trend": trend,
+        "note": note,
+        "avg_price": avg_price,
+        "low_price": low_price,
+        "high_price": high_price,
+        "volatility": round(volatility, 2),
+        "num_listings": result.get("num_sales", 0),
+    }
