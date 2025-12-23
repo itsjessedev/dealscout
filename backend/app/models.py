@@ -59,6 +59,10 @@ class Deal(Base):
     price_status: Mapped[Optional[str]] = mapped_column(String(30))
     price_note: Mapped[Optional[str]] = mapped_column(String(200))  # Explanation for user
 
+    # Local pickup availability (for eBay and platforms that support it)
+    local_pickup_available: Mapped[Optional[bool]] = mapped_column(default=None)
+    distance_miles: Mapped[Optional[int]] = mapped_column(default=None)  # Distance from home
+
     # Status
     status: Mapped[str] = mapped_column(String(20), default="new")
     # new, needs_condition, dismissed, purchased

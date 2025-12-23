@@ -57,6 +57,8 @@ class DealResponse(DealBase):
     ebay_sold_data: Optional[dict] = None
     price_status: Optional[str] = None  # accurate, similar_prices, no_data, mock_data, user_set
     price_note: Optional[str] = None  # Explanation for user
+    local_pickup_available: Optional[bool] = None  # True if local pickup within 100mi
+    distance_miles: Optional[int] = None  # Distance from home location
     status: str
     created_at: datetime
     notified_at: Optional[datetime] = None

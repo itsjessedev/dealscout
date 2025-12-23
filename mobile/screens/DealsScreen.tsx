@@ -99,25 +99,35 @@ export default function DealsScreen() {
     }
   }, []);
 
+  // Determine if a deal qualifies for local pickup
+  const isLocalPickup = (deal: Deal): boolean => {
+    // Priority 1: Backend says local pickup is available (for eBay, etc.)
+    if (deal.local_pickup_available === true) {
+      return true;
+    }
+
+    // Priority 2: Backend calculated distance
+    if (deal.distance_miles !== null && deal.distance_miles <= LOCAL_RADIUS_MILES) {
+      return true;
+    }
+
+    // Priority 3: Calculate from location string (Facebook, Craigslist, etc.)
+    const distance = getDistanceFromHome(deal.location);
+    return distance !== null && distance <= LOCAL_RADIUS_MILES;
+  };
+
   // Filter deals by location
   const filteredDeals = deals.filter((deal) => {
     if (locationFilter === 'all') return true;
-    const distance = getDistanceFromHome(deal.location);
-    if (distance === null) {
-      // Unknown location - show in shipping (assume far away)
-      return locationFilter === 'shipping';
-    }
+    const isLocal = isLocalPickup(deal);
     if (locationFilter === 'local') {
-      return distance <= LOCAL_RADIUS_MILES;
+      return isLocal;
     }
-    return distance > LOCAL_RADIUS_MILES; // shipping
+    return !isLocal; // shipping
   });
 
   // Count deals in each category
-  const localCount = deals.filter((d) => {
-    const dist = getDistanceFromHome(d.location);
-    return dist !== null && dist <= LOCAL_RADIUS_MILES;
-  }).length;
+  const localCount = deals.filter(isLocalPickup).length;
   const shippingCount = deals.length - localCount;
 
   // Auto-refresh when screen comes into focus

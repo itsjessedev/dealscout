@@ -24,6 +24,8 @@ export interface Deal {
   estimated_profit: number | null;
   price_status: string | null; // accurate, similar_prices, limited_data, no_data, mock_data, user_set
   price_note: string | null;
+  local_pickup_available: boolean | null; // True if local pickup within 100mi
+  distance_miles: number | null; // Distance from home location
   status: string;
   created_at: string;
 }
