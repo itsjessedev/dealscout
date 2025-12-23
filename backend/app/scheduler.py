@@ -13,8 +13,20 @@ from .database import async_session
 from .models import Deal, DeviceToken
 from .services.email_ingestion import get_email_service
 from .services.gemini_classifier import get_classifier
-from .services.ebay_lookup import get_market_value, check_local_pickup_available
-from .services.profit_calculator import calculate_estimated_profit, is_profitable_deal
+from .services.ebay_lookup import (
+    get_market_value,
+    check_local_pickup_available,
+    get_part_cost,
+    get_parts_market_value,
+    analyze_price_trends,
+)
+from .services.profit_calculator import (
+    calculate_estimated_profit,
+    is_profitable_deal,
+    calculate_repair_estimate,
+    calculate_true_profit,
+    calculate_deal_score,
+)
 from .services.notifications import get_notification_service
 from .services.location import calculate_distance_from_home, is_within_pickup_range, LOCAL_RADIUS_MILES
 
@@ -76,6 +88,7 @@ async def process_new_emails() -> None:
                 # Classify with Gemini
                 classification = await classifier.classify(deal.title)
                 if classification:
+                    # Basic classification
                     deal.category = classification.category
                     deal.subcategory = classification.subcategory
                     deal.brand = classification.brand
@@ -84,21 +97,84 @@ async def process_new_emails() -> None:
                     deal.condition = classification.condition
                     deal.condition_confidence = classification.condition_confidence
 
-                    # If condition is unknown, mark for review
-                    if classification.condition == "unknown":
+                    # Repair intelligence
+                    deal.repair_needed = classification.repair_needed
+                    deal.repair_keywords = classification.repair_keywords
+                    deal.repair_feasibility = classification.repair_feasibility
+                    deal.repair_notes = classification.repair_notes
+                    deal.repair_part_needed = classification.repair_part_needed
+
+                    # Enhanced classification
+                    deal.part_numbers = classification.part_numbers
+                    deal.variants = classification.variants
+                    deal.is_bundle = classification.is_bundle
+                    deal.bundle_items = classification.bundle_items
+                    deal.accessory_completeness = classification.accessory_completeness
+
+                    # Image intelligence
+                    deal.has_product_photos = classification.has_product_photos
+                    deal.photo_quality = classification.photo_quality
+
+                    # Seller intelligence
+                    deal.seller_username = classification.seller_username
+                    deal.seller_rating = classification.seller_rating
+                    deal.seller_reputation = classification.seller_reputation
+
+                    # AUTO-DISMISS NO-PHOTO DEALS
+                    if classification.has_product_photos is False:
+                        deal.status = "dismissed"
+                        print(f"Auto-dismissed no-photo deal: {deal.title[:50]}")
+                        continue  # Skip further processing
+
+                    # NEEDS_REPAIR ALWAYS goes to review (never auto-notified)
+                    if classification.condition == "needs_repair" or classification.repair_needed:
+                        deal.status = "needs_condition"
+                    elif classification.condition == "unknown":
                         deal.status = "needs_condition"
                     else:
-                        # Look up eBay prices
+                        # Look up eBay prices for non-repair items
                         search_term = f"{classification.brand or ''} {classification.model or classification.subcategory}".strip()
                         if search_term:
+                            # Use part numbers for more accurate search if available
+                            if classification.part_numbers:
+                                search_term = f"{search_term} {classification.part_numbers[0]}"
+
                             pricing = await get_market_value(search_term, classification.condition)
                             if pricing:
                                 deal.market_value = Decimal(str(pricing["avg_price"]))
                                 deal.ebay_sold_data = pricing
+                                deal.price_status = "accurate"
                                 deal.estimated_profit = calculate_estimated_profit(
                                     deal.asking_price,
                                     deal.market_value,
                                 )
+
+                                # Get price trend analysis
+                                try:
+                                    trend_data = await analyze_price_trends(search_term, classification.condition)
+                                    if trend_data:
+                                        deal.price_trend = trend_data.get("trend")
+                                        deal.price_trend_note = trend_data.get("note")
+                                except Exception as e:
+                                    print(f"Error getting price trends: {e}")
+
+                                # Calculate deal score
+                                score_data = calculate_deal_score(
+                                    estimated_profit=deal.estimated_profit,
+                                    market_value=deal.market_value,
+                                    condition=deal.condition,
+                                    repair_needed=deal.repair_needed,
+                                    repair_feasibility=deal.repair_feasibility,
+                                    has_photos=deal.has_product_photos,
+                                    photo_quality=deal.photo_quality,
+                                    price_data_quality=deal.price_status,
+                                    num_listings=pricing.get("num_sales"),
+                                )
+                                deal.deal_score = score_data["deal_score"]
+                                deal.risk_level = score_data["risk_level"]
+                                deal.effort_level = score_data["effort_level"]
+                                deal.demand_indicator = score_data["demand_indicator"]
+                                deal.flip_speed_prediction = score_data["flip_speed_prediction"]
 
                                 # Send notification if profitable
                                 if is_profitable_deal(deal.asking_price, deal.market_value):
@@ -127,6 +203,71 @@ async def process_new_emails() -> None:
                                         print(f"Error checking eBay local pickup: {e}")
                                         deal.local_pickup_available = None
 
+                    # For needs_repair items, get parts pricing and repair estimate
+                    if deal.condition == "needs_repair" or deal.repair_needed:
+                        search_term = f"{classification.brand or ''} {classification.model or classification.subcategory}".strip()
+
+                        # Get parts/broken market value
+                        if search_term:
+                            try:
+                                parts_pricing = await get_parts_market_value(search_term)
+                                if parts_pricing:
+                                    deal.market_value = Decimal(str(parts_pricing["avg_price"]))
+                                    deal.ebay_sold_data = parts_pricing
+                                    deal.price_status = "similar_prices"
+                                    deal.price_note = "Based on similar broken/parts listings"
+                            except Exception as e:
+                                print(f"Error getting parts market value: {e}")
+
+                        # Get repair part cost if specific part identified
+                        if deal.repair_part_needed:
+                            try:
+                                part_data = await get_part_cost(deal.repair_part_needed)
+                                if part_data:
+                                    deal.repair_part_cost = Decimal(str(part_data["part_cost"]))
+                                    deal.repair_part_url = part_data["part_url"]
+
+                                    # Calculate repair estimate
+                                    repair_estimate = calculate_repair_estimate(
+                                        part_cost=deal.repair_part_cost,
+                                        repair_feasibility=deal.repair_feasibility,
+                                        repair_type=deal.repair_part_needed,
+                                    )
+                                    deal.repair_labor_estimate = repair_estimate["labor_estimate"]
+                                    deal.repair_total_estimate = repair_estimate["total_estimate"]
+
+                                    # Calculate true profit (profit - repair costs)
+                                    if deal.estimated_profit:
+                                        deal.true_profit = calculate_true_profit(
+                                            deal.estimated_profit,
+                                            deal.repair_total_estimate,
+                                        )
+                            except Exception as e:
+                                print(f"Error getting repair part cost: {e}")
+
+                        # Calculate deal score for repair items
+                        if deal.market_value:
+                            deal.estimated_profit = calculate_estimated_profit(
+                                deal.asking_price,
+                                deal.market_value,
+                            )
+                            score_data = calculate_deal_score(
+                                estimated_profit=deal.estimated_profit,
+                                market_value=deal.market_value,
+                                condition=deal.condition,
+                                repair_needed=deal.repair_needed,
+                                repair_feasibility=deal.repair_feasibility,
+                                has_photos=deal.has_product_photos,
+                                photo_quality=deal.photo_quality,
+                                price_data_quality=deal.price_status,
+                                num_listings=deal.ebay_sold_data.get("num_sales") if deal.ebay_sold_data else None,
+                            )
+                            deal.deal_score = score_data["deal_score"]
+                            deal.risk_level = score_data["risk_level"]
+                            deal.effort_level = score_data["effort_level"]
+                            deal.demand_indicator = score_data["demand_indicator"]
+                            deal.flip_speed_prediction = score_data["flip_speed_prediction"]
+
             await db.commit()
             print(f"[{datetime.now()}] Processed {len(raw_deals)} emails")
 
@@ -138,15 +279,16 @@ async def check_needs_review() -> None:
     """
     Check for deals needing condition review and notify.
 
+    Includes both unknown condition AND needs_repair items.
     Runs every 15 minutes per user preference.
     """
     print(f"[{datetime.now()}] Checking for items needing review...")
 
     try:
         async with async_session() as db:
-            # Count items needing review
+            # Count items needing review (unknown condition OR needs_repair)
             result = await db.execute(
-                select(Deal).where(Deal.condition == "unknown")
+                select(Deal).where(Deal.status == "needs_condition")
             )
             needs_review = result.scalars().all()
             count = len(needs_review)
