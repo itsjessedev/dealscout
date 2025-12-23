@@ -154,6 +154,7 @@ class EbayCredentials(Base):
     __tablename__ = "ebay_credentials"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    user_id: Mapped[Optional[int]] = mapped_column(ForeignKey("users.id"))
     access_token: Mapped[str] = mapped_column(Text)
     refresh_token: Mapped[str] = mapped_column(Text)
     token_expiry: Mapped[datetime] = mapped_column(DateTime)
@@ -166,5 +167,31 @@ class EbayCredentials(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
     updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
 
+    # Relationship to user
+    user: Mapped[Optional["User"]] = relationship(back_populates="ebay_credentials")
+
     def __repr__(self) -> str:
         return f"<EbayCredentials {self.seller_username or 'unlinked'}>"
+
+
+class User(Base):
+    """User authenticated via eBay OAuth."""
+
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    ebay_username: Mapped[str] = mapped_column(String(100), unique=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(200))
+
+    # Session token for API auth
+    session_token: Mapped[Optional[str]] = mapped_column(String(500))
+    session_expiry: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.utcnow)
+    last_login: Mapped[Optional[datetime]] = mapped_column(DateTime)
+
+    # Relationship to eBay credentials
+    ebay_credentials: Mapped[Optional[EbayCredentials]] = relationship(back_populates="user")
+
+    def __repr__(self) -> str:
+        return f"<User {self.ebay_username}>"

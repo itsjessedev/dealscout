@@ -3,7 +3,7 @@
  */
 
 // Configure this to your backend URL
-const API_URL = 'https://dealscout.junipr.io';
+const API_URL = 'https://dealscout.junipr.io/api';
 
 export interface Deal {
   id: number;
@@ -76,15 +76,26 @@ class ApiService {
     this.baseUrl = baseUrl;
   }
 
+  private authToken: string | null = null;
+
   private async request<T>(
     endpoint: string,
     options: RequestInit = {}
   ): Promise<T> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    };
+
+    // Add auth token if present
+    if (this.authToken) {
+      headers['Authorization'] = `Bearer ${this.authToken}`;
+    }
+
     const response = await fetch(`${this.baseUrl}${endpoint}`, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
-        'Accept': 'application/json',
+        ...headers,
         ...options.headers,
       },
     });
@@ -246,6 +257,36 @@ class ApiService {
       method: 'POST',
       body: JSON.stringify({ token }),
     });
+  }
+
+  // Authentication
+  async getAuthStatus(): Promise<{
+    authenticated: boolean;
+    login_url?: string;
+    user?: { id: number; username: string; display_name: string };
+    ebay?: any;
+  }> {
+    return this.request('/auth/status');
+  }
+
+  async getLoginUrl(state: string = 'mobile'): Promise<{ auth_url: string }> {
+    return this.request(`/auth/login?state=${state}`);
+  }
+
+  async getCurrentUser(): Promise<{
+    user: { id: number; username: string; display_name: string };
+    ebay: any;
+  }> {
+    return this.request('/auth/me');
+  }
+
+  async logout(): Promise<{ success: boolean; message: string }> {
+    return this.request('/auth/logout', { method: 'POST' });
+  }
+
+  // Set auth token for authenticated requests
+  setAuthToken(token: string | null) {
+    this.authToken = token;
   }
 
   // eBay account integration

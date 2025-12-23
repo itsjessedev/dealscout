@@ -5,7 +5,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from .database import init_db
-from .routers import deals_router, flips_router, stats_router, ebay_router
+from .routers import deals_router, flips_router, stats_router, ebay_router, auth_router
 from .scheduler import start_scheduler, stop_scheduler
 
 
@@ -41,6 +41,7 @@ app.include_router(deals_router)
 app.include_router(flips_router)
 app.include_router(stats_router)
 app.include_router(ebay_router)
+app.include_router(auth_router)
 
 
 @app.get("/")

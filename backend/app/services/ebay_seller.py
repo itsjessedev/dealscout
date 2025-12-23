@@ -149,6 +149,28 @@ async def get_valid_access_token(db: AsyncSession) -> Optional[str]:
     return creds.access_token
 
 
+async def get_ebay_user_info(access_token: str) -> dict:
+    """Get eBay user identity info (username)."""
+    async with httpx.AsyncClient() as client:
+        response = await client.get(
+            "https://apiz.ebay.com/commerce/identity/v1/user/",
+            headers={
+                "Authorization": f"Bearer {access_token}",
+                "Content-Type": "application/json",
+            },
+            timeout=30.0,
+        )
+
+        if response.status_code == 200:
+            data = response.json()
+            return {
+                "username": data.get("username"),
+                "user_id": data.get("userId"),
+            }
+
+        return {}
+
+
 async def get_seller_account_info(access_token: str) -> dict:
     """Get seller account information including store subscription."""
     async with httpx.AsyncClient() as client:
@@ -190,6 +212,8 @@ async def save_credentials(
     refresh_token: str,
     expires_in: int,
     account_info: Optional[dict] = None,
+    user_info: Optional[dict] = None,
+    user_id: Optional[int] = None,
 ) -> EbayCredentials:
     """Save or update eBay credentials in database."""
     # Check for existing credentials
@@ -198,6 +222,7 @@ async def save_credentials(
 
     tier = account_info.get("tier", "NO_STORE") if account_info else "NO_STORE"
     fee = get_fee_for_tier(tier)
+    username = user_info.get("username") if user_info else None
 
     if creds:
         # Update existing
@@ -207,6 +232,10 @@ async def save_credentials(
         creds.store_subscription_tier = tier
         creds.fee_percentage = fee
         creds.updated_at = datetime.utcnow()
+        if username:
+            creds.seller_username = username
+        if user_id:
+            creds.user_id = user_id
     else:
         # Create new
         creds = EbayCredentials(
@@ -215,6 +244,8 @@ async def save_credentials(
             token_expiry=datetime.utcnow() + timedelta(seconds=expires_in),
             store_subscription_tier=tier,
             fee_percentage=fee,
+            seller_username=username,
+            user_id=user_id,
         )
         db.add(creds)
 
