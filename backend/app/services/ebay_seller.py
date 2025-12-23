@@ -19,10 +19,12 @@ EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
 EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
 EBAY_ACCOUNT_API = "https://api.ebay.com/sell/account/v1"
 
-# Scopes needed for seller account access
+# Scopes needed for seller account access and listing creation
 SELLER_SCOPES = [
     "https://api.ebay.com/oauth/api_scope",
     "https://api.ebay.com/oauth/api_scope/sell.account.readonly",
+    "https://api.ebay.com/oauth/api_scope/sell.inventory",  # Create/manage listings
+    "https://api.ebay.com/oauth/api_scope/sell.fulfillment.readonly",  # Read orders
 ]
 
 # eBay store subscription tiers and their approximate final value fees

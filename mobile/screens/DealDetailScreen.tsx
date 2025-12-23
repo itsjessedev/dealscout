@@ -16,7 +16,7 @@ import {
 } from 'react-native';
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import ImageViewer from 'react-native-image-zoom-viewer';
-import { api, Deal } from '../services/api';
+import { api, Deal, RepairOption } from '../services/api';
 import { useEbay } from '../contexts/EbayContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
@@ -37,6 +37,12 @@ export default function DealDetailScreen() {
   const [fullscreenImage, setFullscreenImage] = useState<string | null>(null);
   const [customValueModal, setCustomValueModal] = useState(false);
   const [customValue, setCustomValue] = useState('');
+  // Track which repair options are selected (for profit calculations)
+  const [selectedRepairs, setSelectedRepairs] = useState<Set<string>>(new Set());
+  // Track custom part costs for repairs without pricing
+  const [customPartCosts, setCustomPartCosts] = useState<Record<string, number>>({});
+  const [editingRepairCost, setEditingRepairCost] = useState<string | null>(null);
+  const [tempRepairCost, setTempRepairCost] = useState('');
 
   // Get images array (support multiple images in future, fallback to single)
   const images: string[] = deal.image_urls?.length
@@ -58,7 +64,11 @@ export default function DealDetailScreen() {
 
   const bestProfit = Math.max(ebayProfit, facebookProfit);
   const isFacebookOnly = ebayProfit <= 0 && facebookProfit > 0;
-  const canPurchase = deal.condition !== 'unknown' && deal.market_value != null;
+
+  // Check if market value needs to be set manually
+  const needsMarketValue = ['no_data', 'mock_data'].includes(deal.price_status || '');
+  const isRepairItem = deal.condition === 'needs_repair' || deal.repair_needed === true;
+  const canPurchase = deal.condition !== 'unknown' && deal.market_value != null && !needsMarketValue;
 
   // Blue only for FB-only deals, otherwise graded green/yellow
   const profitColor = isFacebookOnly
@@ -181,9 +191,15 @@ export default function DealDetailScreen() {
     if (!purchasePrice) return;
 
     try {
+      // Build planned repairs from selected options
+      const plannedRepairs = deal.repair_options
+        ?.filter(opt => selectedRepairs.has(opt.id))
+        || undefined;
+
       await api.purchaseDeal(deal.id, {
         buy_price: parseFloat(purchasePrice),
         buy_date: new Date().toISOString().split('T')[0],
+        planned_repairs: plannedRepairs && plannedRepairs.length > 0 ? plannedRepairs : undefined,
       });
       Alert.alert('Success', 'Added to Current Flips');
       setPurchaseModal(false);
@@ -353,56 +369,58 @@ export default function DealDetailScreen() {
           </View>
         </View>
 
-        {/* Condition Toggle */}
-        <View style={styles.conditionSection}>
-          <Text style={styles.sectionTitle}>Condition</Text>
-          <Text style={styles.conditionHint}>
-            Is this item new or used? Tap to change and recalculate value.
-          </Text>
-          <View style={styles.conditionButtons}>
-            <TouchableOpacity
-              style={[
-                styles.conditionBtn,
-                deal.condition === 'new' && styles.conditionBtnActive,
-                deal.condition === 'new' && isFacebookOnly && { backgroundColor: '#1877F2' },
-              ]}
-              onPress={() => handleConditionChange('new')}
-              disabled={processing}
-            >
-              <Text
+        {/* Condition Toggle - Not shown for repair items (always used after repair) */}
+        {!isRepairItem && (
+          <View style={styles.conditionSection}>
+            <Text style={styles.sectionTitle}>Condition</Text>
+            <Text style={styles.conditionHint}>
+              Is this item new or used? Tap to change and recalculate value.
+            </Text>
+            <View style={styles.conditionButtons}>
+              <TouchableOpacity
                 style={[
-                  styles.conditionBtnText,
-                  deal.condition === 'new' && styles.conditionBtnTextActive,
-                  deal.condition === 'new' && isFacebookOnly && { color: '#fff' },
+                  styles.conditionBtn,
+                  deal.condition === 'new' && styles.conditionBtnActive,
+                  deal.condition === 'new' && isFacebookOnly && { backgroundColor: '#1877F2' },
                 ]}
+                onPress={() => handleConditionChange('new')}
+                disabled={processing}
               >
-                NEW
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[
-                styles.conditionBtn,
-                deal.condition === 'used' && styles.conditionBtnActive,
-                deal.condition === 'used' && isFacebookOnly && { backgroundColor: '#1877F2' },
-              ]}
-              onPress={() => handleConditionChange('used')}
-              disabled={processing}
-            >
-              <Text
+                <Text
+                  style={[
+                    styles.conditionBtnText,
+                    deal.condition === 'new' && styles.conditionBtnTextActive,
+                    deal.condition === 'new' && isFacebookOnly && { color: '#fff' },
+                  ]}
+                >
+                  NEW
+                </Text>
+              </TouchableOpacity>
+              <TouchableOpacity
                 style={[
-                  styles.conditionBtnText,
-                  deal.condition === 'used' && styles.conditionBtnTextActive,
-                  deal.condition === 'used' && isFacebookOnly && { color: '#fff' },
+                  styles.conditionBtn,
+                  deal.condition === 'used' && styles.conditionBtnActive,
+                  deal.condition === 'used' && isFacebookOnly && { backgroundColor: '#1877F2' },
                 ]}
+                onPress={() => handleConditionChange('used')}
+                disabled={processing}
               >
-                USED
-              </Text>
-            </TouchableOpacity>
+                <Text
+                  style={[
+                    styles.conditionBtnText,
+                    deal.condition === 'used' && styles.conditionBtnTextActive,
+                    deal.condition === 'used' && isFacebookOnly && { color: '#fff' },
+                  ]}
+                >
+                  USED
+                </Text>
+              </TouchableOpacity>
+            </View>
+            {processing && (
+              <Text style={styles.processingText}>Recalculating...</Text>
+            )}
           </View>
-          {processing && (
-            <Text style={styles.processingText}>Recalculating...</Text>
-          )}
-        </View>
+        )}
 
         {/* Details */}
         <View style={styles.detailsSection}>
@@ -436,71 +454,323 @@ export default function DealDetailScreen() {
         </View>
 
         {/* Repair Info (if needs repair) */}
-        {(deal.condition === 'needs_repair' || deal.repair_needed) && (
-          <View style={[styles.repairSection, { borderColor: '#ff9800' }]}>
-            <Text style={[styles.sectionTitle, { color: '#ff9800' }]}>
-              Repair Information
-            </Text>
-            {deal.repair_notes && (
-              <Text style={styles.repairNotes}>{deal.repair_notes}</Text>
-            )}
-            {deal.repair_feasibility && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Difficulty</Text>
-                <Text style={[styles.detailValue, { textTransform: 'capitalize' }]}>
-                  {deal.repair_feasibility}
-                </Text>
-              </View>
-            )}
-            {deal.repair_part_needed && (
-              <View style={styles.detailRow}>
-                <Text style={styles.detailLabel}>Part Needed</Text>
-                <Text style={styles.detailValue}>{deal.repair_part_needed}</Text>
-              </View>
-            )}
-            {deal.repair_part_cost !== null && (
-              <View style={styles.repairCostBreakdown}>
-                <View style={styles.detailRow}>
-                  <Text style={styles.detailLabel}>Part Cost</Text>
-                  <Text style={styles.detailValue}>${Number(deal.repair_part_cost).toFixed(2)}</Text>
-                </View>
-                {deal.repair_labor_estimate !== null && (
+        {(deal.condition === 'needs_repair' || deal.repair_needed) && (() => {
+          const asIsValue = Number(deal.as_is_value) || 0;
+          const repairedValue = marketValue; // market_value is the repaired value
+
+          // Calculate selected repair cost - parts only, no labor estimate
+          const repairOptions = deal.repair_options || [];
+          const selectedRepairCost = repairOptions
+            .filter(opt => selectedRepairs.has(opt.id))
+            .reduce((sum, opt) => {
+              const partCost = customPartCosts[opt.id] ?? opt.part_cost;
+              return sum + partCost;
+            }, 0);
+
+          // Calculate dynamic difficulty based on selected repairs
+          const getRepairDifficulty = () => {
+            if (selectedRepairs.size === 0) return deal.repair_feasibility || 'unknown';
+            const selectedOptions = repairOptions.filter(opt => selectedRepairs.has(opt.id));
+            const totalHours = selectedOptions.reduce((sum, opt) => sum + opt.labor_hours, 0);
+            if (totalHours <= 1) return 'easy';
+            if (totalHours <= 3) return 'moderate';
+            if (totalHours <= 6) return 'difficult';
+            return 'professional';
+          };
+
+          // Calculate dynamic risk based on selected repairs
+          const getRepairRisk = () => {
+            if (selectedRepairs.size === 0) return 'low';
+            const selectedOptions = repairOptions.filter(opt => selectedRepairs.has(opt.id));
+            // Higher cost repairs = higher risk
+            const totalCost = selectedOptions.reduce((sum, opt) => {
+              const partCost = customPartCosts[opt.id] ?? opt.part_cost;
+              return sum + partCost;
+            }, 0);
+            // Check for missing prices
+            const hasMissingPrices = selectedOptions.some(opt =>
+              (opt.price_status === 'not_found' || opt.price_status === 'labor_only') &&
+              customPartCosts[opt.id] === undefined
+            );
+            if (hasMissingPrices) return 'high';
+            if (totalCost > 150) return 'high';
+            if (totalCost > 75) return 'medium';
+            return 'low';
+          };
+
+          // Calculate dynamic effort based on selected repairs
+          const getRepairEffort = () => {
+            if (selectedRepairs.size === 0) return 'low';
+            const selectedOptions = repairOptions.filter(opt => selectedRepairs.has(opt.id));
+            const totalHours = selectedOptions.reduce((sum, opt) => sum + opt.labor_hours, 0);
+            if (totalHours <= 1) return 'low';
+            if (totalHours <= 3) return 'medium';
+            return 'high';
+          };
+
+          const dynamicDifficulty = getRepairDifficulty();
+          const dynamicRisk = getRepairRisk();
+          const dynamicEffort = getRepairEffort();
+
+          // Fallback to legacy single repair if no options
+          const totalRepairCost = repairOptions.length > 0
+            ? selectedRepairCost
+            : Number(deal.repair_total_estimate) || 0;
+
+          // As-Is profits (sell broken)
+          const asIsEbayProfit = asIsValue - askingPrice - (asIsValue * ebayFeeRate);
+          const asIsFbProfit = asIsValue - askingPrice;
+
+          // Repaired profits (fix then sell) - based on SELECTED repairs
+          const repairedEbayProfit = repairedValue - askingPrice - totalRepairCost - (repairedValue * ebayFeeRate);
+          const repairedFbProfit = repairedValue - askingPrice - totalRepairCost;
+
+          const toggleRepair = (optId: string) => {
+            setSelectedRepairs(prev => {
+              const next = new Set(prev);
+              if (next.has(optId)) {
+                next.delete(optId);
+              } else {
+                next.add(optId);
+              }
+              return next;
+            });
+          };
+
+          return (
+            <View style={[styles.repairSection, { borderColor: '#ff9800' }]}>
+              <Text style={[styles.sectionTitle, { color: '#ff9800' }]}>
+                Repair Item - Your Options
+              </Text>
+
+              {deal.repair_notes && (
+                <Text style={styles.repairNotes}>{deal.repair_notes}</Text>
+              )}
+
+              {/* Option 1: Sell As-Is */}
+              {asIsValue > 0 && (
+                <View style={styles.repairOptionCard}>
+                  <Text style={styles.repairOptionTitle}>Sell As-Is (For Parts)</Text>
                   <View style={styles.detailRow}>
-                    <Text style={styles.detailLabel}>Labor Est.</Text>
-                    <Text style={styles.detailValue}>${Number(deal.repair_labor_estimate).toFixed(2)}</Text>
+                    <Text style={styles.detailLabel}>As-Is Value</Text>
+                    <Text style={styles.detailValue}>${asIsValue.toFixed(2)}</Text>
                   </View>
-                )}
-                {deal.repair_total_estimate !== null && (
-                  <View style={[styles.detailRow, { borderTopWidth: 1, borderTopColor: '#333', paddingTop: 8 }]}>
-                    <Text style={[styles.detailLabel, { fontWeight: 'bold' }]}>Total Repair</Text>
-                    <Text style={[styles.detailValue, { fontWeight: 'bold', color: '#ff9800' }]}>
-                      ${Number(deal.repair_total_estimate).toFixed(2)}
+                  <View style={styles.repairProfitRow}>
+                    <View style={styles.repairProfitItem}>
+                      <Text style={styles.repairProfitLabel}>eBay</Text>
+                      <Text style={[
+                        styles.repairProfitValue,
+                        { color: asIsEbayProfit > 0 ? '#4ecca3' : '#ff6b6b' }
+                      ]}>
+                        {asIsEbayProfit >= 0 ? '+' : ''}${asIsEbayProfit.toFixed(0)}
+                      </Text>
+                    </View>
+                    <View style={styles.repairProfitItem}>
+                      <Text style={styles.repairProfitLabel}>Facebook</Text>
+                      <Text style={[
+                        styles.repairProfitValue,
+                        { color: asIsFbProfit > 0 ? '#1877F2' : '#ff6b6b' }
+                      ]}>
+                        {asIsFbProfit >= 0 ? '+' : ''}${asIsFbProfit.toFixed(0)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Repair Options - Toggleable */}
+              {repairOptions.length > 0 && (
+                <View style={[styles.repairOptionCard, { borderColor: '#4ecca3' }]}>
+                  <Text style={[styles.repairOptionTitle, { color: '#4ecca3' }]}>
+                    Repair & Sell (select repairs)
+                  </Text>
+
+                  {/* Toggleable repair options */}
+                  {repairOptions.map((opt) => {
+                    const partCost = customPartCosts[opt.id] ?? opt.part_cost;
+                    const isSelected = selectedRepairs.has(opt.id);
+                    const needsCustomPrice = opt.price_status === 'labor_only' || opt.price_status === 'not_found';
+                    const hasCustomPrice = customPartCosts[opt.id] !== undefined;
+
+                    return (
+                      <View key={opt.id}>
+                        <TouchableOpacity
+                          style={[styles.repairToggleRow, isSelected && styles.repairToggleRowSelected]}
+                          onPress={() => toggleRepair(opt.id)}
+                        >
+                          <View style={[styles.repairCheckbox, isSelected && styles.repairCheckboxSelected]}>
+                            {isSelected && <Text style={styles.repairCheckmark}>✓</Text>}
+                          </View>
+                          <View style={styles.repairToggleInfo}>
+                            <Text style={styles.repairToggleName}>{opt.name}</Text>
+                            {needsCustomPrice && !hasCustomPrice ? (
+                              <Text style={styles.repairToggleWarning}>
+                                ⚠️ {opt.price_note || 'Part cost unknown'}
+                              </Text>
+                            ) : (
+                              <Text style={styles.repairToggleDetail}>
+                                Part cost: ${partCost.toFixed(0)}
+                              </Text>
+                            )}
+                          </View>
+                          <View style={styles.repairCostContainer}>
+                            {needsCustomPrice && !hasCustomPrice ? (
+                              <TouchableOpacity
+                                style={styles.setPartCostBtn}
+                                onPress={(e) => {
+                                  e.stopPropagation();
+                                  setEditingRepairCost(opt.id);
+                                  setTempRepairCost('');
+                                }}
+                              >
+                                <Text style={styles.setPartCostText}>Set Cost</Text>
+                              </TouchableOpacity>
+                            ) : (
+                              <Text style={[styles.repairToggleCost, isSelected && { color: '#ff9800' }]}>
+                                ${partCost.toFixed(0)}
+                              </Text>
+                            )}
+                          </View>
+                        </TouchableOpacity>
+                        {hasCustomPrice && (
+                          <TouchableOpacity
+                            style={styles.editCustomCostLink}
+                            onPress={() => {
+                              setEditingRepairCost(opt.id);
+                              setTempRepairCost(customPartCosts[opt.id]?.toString() || '');
+                            }}
+                          >
+                            <Text style={styles.editCustomCostText}>
+                              Custom part cost: ${customPartCosts[opt.id]} (tap to edit)
+                            </Text>
+                          </TouchableOpacity>
+                        )}
+                      </View>
+                    );
+                  })}
+
+                  {/* Totals */}
+                  <View style={styles.repairTotalsSection}>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Repaired Value</Text>
+                      <Text style={[styles.detailValue, { color: '#4ecca3' }]}>${repairedValue.toFixed(2)}</Text>
+                    </View>
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Selected Repairs</Text>
+                      <Text style={[styles.detailValue, { color: '#ff9800' }]}>
+                        {selectedRepairs.size > 0 ? `-$${totalRepairCost.toFixed(0)}` : '$0'}
+                      </Text>
+                    </View>
+                    <View style={styles.repairProfitRow}>
+                      <View style={styles.repairProfitItem}>
+                        <Text style={styles.repairProfitLabel}>eBay</Text>
+                        <Text style={[
+                          styles.repairProfitValue,
+                          { color: repairedEbayProfit > 0 ? '#4ecca3' : '#ff6b6b' }
+                        ]}>
+                          {repairedEbayProfit >= 0 ? '+' : ''}${repairedEbayProfit.toFixed(0)}
+                        </Text>
+                      </View>
+                      <View style={styles.repairProfitItem}>
+                        <Text style={styles.repairProfitLabel}>Facebook</Text>
+                        <Text style={[
+                          styles.repairProfitValue,
+                          { color: repairedFbProfit > 0 ? '#1877F2' : '#ff6b6b' }
+                        ]}>
+                          {repairedFbProfit >= 0 ? '+' : ''}${repairedFbProfit.toFixed(0)}
+                        </Text>
+                      </View>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Legacy single repair (if no repair_options) */}
+              {repairOptions.length === 0 && (deal.repair_part_needed || deal.repair_total_estimate) && (
+                <View style={[styles.repairOptionCard, { borderColor: '#4ecca3' }]}>
+                  <Text style={[styles.repairOptionTitle, { color: '#4ecca3' }]}>
+                    Repair & Sell
+                  </Text>
+                  <View style={styles.detailRow}>
+                    <Text style={styles.detailLabel}>Repaired Value</Text>
+                    <Text style={[styles.detailValue, { color: '#4ecca3' }]}>${repairedValue.toFixed(2)}</Text>
+                  </View>
+                  {deal.repair_total_estimate && (
+                    <View style={styles.detailRow}>
+                      <Text style={styles.detailLabel}>Repair Cost</Text>
+                      <Text style={[styles.detailValue, { color: '#ff9800' }]}>
+                        -${Number(deal.repair_total_estimate).toFixed(2)}
+                      </Text>
+                    </View>
+                  )}
+                  <View style={styles.repairProfitRow}>
+                    <View style={styles.repairProfitItem}>
+                      <Text style={styles.repairProfitLabel}>eBay</Text>
+                      <Text style={[
+                        styles.repairProfitValue,
+                        { color: repairedEbayProfit > 0 ? '#4ecca3' : '#ff6b6b' }
+                      ]}>
+                        {repairedEbayProfit >= 0 ? '+' : ''}${repairedEbayProfit.toFixed(0)}
+                      </Text>
+                    </View>
+                    <View style={styles.repairProfitItem}>
+                      <Text style={styles.repairProfitLabel}>Facebook</Text>
+                      <Text style={[
+                        styles.repairProfitValue,
+                        { color: repairedFbProfit > 0 ? '#1877F2' : '#ff6b6b' }
+                      ]}>
+                        {repairedFbProfit >= 0 ? '+' : ''}${repairedFbProfit.toFixed(0)}
+                      </Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+
+              {/* Dynamic Indicators based on selected repairs */}
+              {repairOptions.length > 0 && (
+                <View style={styles.repairIndicators}>
+                  <View style={styles.repairIndicator}>
+                    <Text style={styles.repairIndicatorLabel}>Difficulty</Text>
+                    <Text style={[
+                      styles.repairIndicatorValue,
+                      {
+                        color: dynamicDifficulty === 'easy' ? '#4ecca3' :
+                               dynamicDifficulty === 'moderate' ? '#ffc107' :
+                               dynamicDifficulty === 'difficult' ? '#ff9800' : '#ff6b6b'
+                      }
+                    ]}>
+                      {dynamicDifficulty.toUpperCase()}
                     </Text>
                   </View>
-                )}
-              </View>
-            )}
-            {deal.repair_part_url && (
-              <TouchableOpacity
-                style={styles.partLinkBtn}
-                onPress={() => Linking.openURL(deal.repair_part_url!)}
-              >
-                <Text style={styles.partLinkText}>View Part on eBay →</Text>
-              </TouchableOpacity>
-            )}
-            {deal.true_profit !== null && (
-              <View style={styles.trueProfitRow}>
-                <Text style={styles.trueProfitLabel}>Profit After Repair</Text>
-                <Text style={[
-                  styles.trueProfitValue,
-                  { color: Number(deal.true_profit) > 0 ? '#4ecca3' : '#ff6b6b' }
-                ]}>
-                  {Number(deal.true_profit) >= 0 ? '+' : ''}${Number(deal.true_profit).toFixed(2)}
-                </Text>
-              </View>
-            )}
-          </View>
-        )}
+                  <View style={styles.repairIndicator}>
+                    <Text style={styles.repairIndicatorLabel}>Risk</Text>
+                    <Text style={[
+                      styles.repairIndicatorValue,
+                      {
+                        color: dynamicRisk === 'low' ? '#4ecca3' :
+                               dynamicRisk === 'medium' ? '#ffc107' : '#ff6b6b'
+                      }
+                    ]}>
+                      {dynamicRisk.toUpperCase()}
+                    </Text>
+                  </View>
+                  <View style={styles.repairIndicator}>
+                    <Text style={styles.repairIndicatorLabel}>Effort</Text>
+                    <Text style={[
+                      styles.repairIndicatorValue,
+                      {
+                        color: dynamicEffort === 'low' ? '#4ecca3' :
+                               dynamicEffort === 'medium' ? '#ffc107' : '#ff6b6b'
+                      }
+                    ]}>
+                      {dynamicEffort.toUpperCase()}
+                    </Text>
+                  </View>
+                </View>
+              )}
+            </View>
+          );
+        })()}
 
         {/* Deal Intelligence */}
         {deal.deal_score !== null && (
@@ -616,7 +886,11 @@ export default function DealDetailScreen() {
             isFacebookOnly && { color: '#fff' },
             !canPurchase && styles.purchaseBtnTextDisabled,
           ]}>
-            {canPurchase ? 'I Bought This' : 'Set Condition First'}
+            {canPurchase
+              ? 'I Bought This'
+              : needsMarketValue
+                ? 'Set Market Value First'
+                : 'Set Condition First'}
           </Text>
         </TouchableOpacity>
       </View>
@@ -643,6 +917,18 @@ export default function DealDetailScreen() {
               placeholderTextColor="#666"
               autoFocus
             />
+            {/* Show planned repairs for repair items */}
+            {(deal.repair_needed || deal.condition === 'needs_repair') && selectedRepairs.size > 0 && (
+              <View style={styles.plannedRepairsBox}>
+                <Text style={styles.plannedRepairsTitle}>Planned Repairs:</Text>
+                {deal.repair_options?.filter(opt => selectedRepairs.has(opt.id)).map(opt => (
+                  <Text key={opt.id} style={styles.plannedRepairItem}>• {opt.name}</Text>
+                ))}
+              </View>
+            )}
+            {(deal.repair_needed || deal.condition === 'needs_repair') && selectedRepairs.size === 0 && (
+              <Text style={styles.noRepairsNote}>Selling as-is (no repairs selected)</Text>
+            )}
             <View style={styles.modalButtons}>
               <TouchableOpacity
                 style={styles.modalCancelBtn}
@@ -698,6 +984,59 @@ export default function DealDetailScreen() {
                 <Text style={[styles.modalConfirmText, isFacebookOnly && { color: '#fff' }]}>
                   {processing ? 'Saving...' : 'Save'}
                 </Text>
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* Custom Part Cost Modal */}
+      <Modal
+        visible={editingRepairCost !== null}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setEditingRepairCost(null)}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalTitle}>Set Part Cost</Text>
+            <Text style={styles.modalSubtitle}>
+              {deal.repair_options?.find(opt => opt.id === editingRepairCost)?.name || 'Repair'}
+              {'\n'}
+              <Text style={{ color: '#ff9800', fontSize: 12 }}>
+                {deal.repair_options?.find(opt => opt.id === editingRepairCost)?.price_note || 'Part price not found automatically'}
+              </Text>
+            </Text>
+            <TextInput
+              style={styles.modalInput}
+              value={tempRepairCost}
+              onChangeText={setTempRepairCost}
+              keyboardType="decimal-pad"
+              placeholder="Enter part cost"
+              placeholderTextColor="#666"
+              autoFocus
+            />
+            <View style={styles.modalButtons}>
+              <TouchableOpacity
+                style={styles.modalCancelBtn}
+                onPress={() => setEditingRepairCost(null)}
+              >
+                <Text style={styles.modalCancelText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.modalConfirmBtn, { backgroundColor: '#ff9800' }]}
+                onPress={() => {
+                  if (editingRepairCost && tempRepairCost) {
+                    setCustomPartCosts(prev => ({
+                      ...prev,
+                      [editingRepairCost]: parseFloat(tempRepairCost),
+                    }));
+                  }
+                  setEditingRepairCost(null);
+                  setTempRepairCost('');
+                }}
+              >
+                <Text style={[styles.modalConfirmText, { color: '#000' }]}>Save</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -1054,6 +1393,31 @@ const styles = StyleSheet.create({
     color: '#000',
     fontWeight: '600',
   },
+  plannedRepairsBox: {
+    backgroundColor: 'rgba(78,204,163,0.1)',
+    borderWidth: 1,
+    borderColor: '#4ecca3',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 16,
+  },
+  plannedRepairsTitle: {
+    color: '#4ecca3',
+    fontSize: 13,
+    fontWeight: '600',
+    marginBottom: 4,
+  },
+  plannedRepairItem: {
+    color: '#fff',
+    fontSize: 13,
+    marginTop: 2,
+  },
+  noRepairsNote: {
+    color: '#ff9800',
+    fontSize: 13,
+    textAlign: 'center',
+    marginBottom: 16,
+  },
   fullscreenContainer: {
     flex: 1,
     backgroundColor: '#000',
@@ -1096,6 +1460,109 @@ const styles = StyleSheet.create({
     paddingTop: 8,
     borderTopWidth: 1,
     borderTopColor: '#333',
+  },
+  repairOptionCard: {
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 8,
+    padding: 12,
+    marginBottom: 12,
+    borderWidth: 1,
+    borderColor: '#555',
+  },
+  repairOptionTitle: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: 'bold',
+    marginBottom: 8,
+  },
+  repairProfitRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  repairProfitItem: {
+    alignItems: 'center',
+  },
+  repairProfitLabel: {
+    color: '#888',
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  repairProfitValue: {
+    fontSize: 18,
+    fontWeight: 'bold',
+  },
+  repairDetails: {
+    marginTop: 8,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  repairToggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    padding: 10,
+    marginBottom: 8,
+    backgroundColor: 'rgba(0,0,0,0.2)',
+    borderRadius: 8,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  repairToggleRowSelected: {
+    borderColor: '#4ecca3',
+    backgroundColor: 'rgba(78,204,163,0.1)',
+  },
+  repairCheckbox: {
+    width: 24,
+    height: 24,
+    borderRadius: 4,
+    borderWidth: 2,
+    borderColor: '#555',
+    marginRight: 12,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  repairCheckboxSelected: {
+    borderColor: '#4ecca3',
+    backgroundColor: '#4ecca3',
+  },
+  repairCheckmark: {
+    color: '#000',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  repairToggleInfo: {
+    flex: 1,
+  },
+  repairToggleName: {
+    color: '#fff',
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  repairToggleDetail: {
+    color: '#888',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  repairToggleCost: {
+    color: '#888',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  repairTotalsSection: {
+    marginTop: 12,
+    paddingTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  repairDifficulty: {
+    color: '#888',
+    fontSize: 13,
+    marginTop: 12,
+    textAlign: 'center',
   },
   partLinkBtn: {
     backgroundColor: '#ff9800',
@@ -1200,16 +1667,18 @@ const styles = StyleSheet.create({
   },
   trendRow: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
     marginTop: 8,
   },
   trendLabel: {
     color: '#888',
     fontSize: 14,
+    marginRight: 8,
   },
   trendValue: {
     color: '#fff',
     fontSize: 14,
+    flex: 1,
+    flexWrap: 'wrap',
   },
   // Bundle section styles
   bundleSection: {
@@ -1229,5 +1698,58 @@ const styles = StyleSheet.create({
     fontSize: 14,
     fontWeight: '600',
     marginTop: 8,
+  },
+  // Repair toggle additional styles
+  repairToggleWarning: {
+    color: '#ff9800',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  repairCostContainer: {
+    alignItems: 'flex-end',
+    minWidth: 70,
+  },
+  setPartCostBtn: {
+    backgroundColor: '#ff9800',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 6,
+  },
+  setPartCostText: {
+    color: '#000',
+    fontSize: 12,
+    fontWeight: 'bold',
+  },
+  editCustomCostLink: {
+    paddingLeft: 36,
+    paddingBottom: 8,
+    marginTop: -4,
+  },
+  editCustomCostText: {
+    color: '#ff9800',
+    fontSize: 11,
+    fontStyle: 'italic',
+  },
+  // Repair dynamic indicators
+  repairIndicators: {
+    flexDirection: 'row',
+    justifyContent: 'space-around',
+    paddingTop: 12,
+    marginTop: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#333',
+  },
+  repairIndicator: {
+    alignItems: 'center',
+    flex: 1,
+  },
+  repairIndicatorLabel: {
+    color: '#888',
+    fontSize: 11,
+    marginBottom: 4,
+  },
+  repairIndicatorValue: {
+    fontSize: 13,
+    fontWeight: 'bold',
   },
 });

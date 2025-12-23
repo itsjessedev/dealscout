@@ -3,7 +3,7 @@
 from decimal import Decimal
 from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import select
+from sqlalchemy import select, or_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..database import get_db
@@ -40,7 +40,13 @@ async def list_deals(
     if category:
         query = query.where(Deal.category == category)
     if needs_review:
-        query = query.where(Deal.condition == "unknown")
+        # Show items that need condition review OR need repair confirmation
+        query = query.where(
+            or_(
+                Deal.condition == "unknown",
+                Deal.status == "needs_condition"
+            )
+        )
 
     result = await db.execute(query)
     return result.scalars().all()
@@ -218,6 +224,8 @@ async def purchase_deal(
         buy_source=deal.source,
         notes=purchase_data.notes,
         status="active",
+        # Track planned repairs for items needing repair
+        planned_repairs=purchase_data.planned_repairs,
     )
     db.add(flip)
 

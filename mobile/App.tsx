@@ -11,6 +11,7 @@ import * as Notifications from 'expo-notifications';
 import DealsScreen from './screens/DealsScreen';
 import DealDetailScreen from './screens/DealDetailScreen';
 import CurrentFlipsScreen from './screens/CurrentFlipsScreen';
+import ListItemScreen from './screens/ListItemScreen';
 import ProfitsScreen from './screens/ProfitsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import LoginScreen from './screens/LoginScreen';
@@ -57,9 +58,34 @@ function DealsStack() {
   );
 }
 
+// Flips stack with listing screen
+function FlipsStack() {
+  return (
+    <Stack.Navigator
+      screenOptions={{
+        headerStyle: { backgroundColor: '#1a1a2e' },
+        headerTintColor: '#fff',
+        headerStatusBarHeight: statusBarHeight,
+      }}
+    >
+      <Stack.Screen
+        name="FlipsList"
+        component={CurrentFlipsScreen}
+        options={{ title: 'Current Flips' }}
+      />
+      <Stack.Screen
+        name="ListItem"
+        component={ListItemScreen}
+        options={{ title: 'List on eBay' }}
+      />
+    </Stack.Navigator>
+  );
+}
+
 // Main app navigator component
 function AppNavigator() {
   const { isAuthenticated, isLoading } = useAuth();
+  const [skippedLogin, setSkippedLogin] = React.useState(false);
 
   useEffect(() => {
     // Register for push notifications only when authenticated
@@ -88,9 +114,9 @@ function AppNavigator() {
     );
   }
 
-  // Show login screen if not authenticated
-  if (!isAuthenticated) {
-    return <LoginScreen />;
+  // Show login screen if not authenticated (and hasn't skipped)
+  if (!isAuthenticated && !skippedLogin) {
+    return <LoginScreen onSkip={() => setSkippedLogin(true)} />;
   }
 
   // Show main app when authenticated
@@ -114,8 +140,9 @@ function AppNavigator() {
       />
       <Tab.Screen
         name="Current Flips"
-        component={CurrentFlipsScreen}
+        component={FlipsStack}
         options={{
+          headerShown: false,
           tabBarIcon: ({ color }) => <TabIcon name="↻" color={color} />,
         }}
       />

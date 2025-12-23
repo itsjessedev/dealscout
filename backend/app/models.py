@@ -52,7 +52,8 @@ class Deal(Base):
     condition_confidence: Mapped[Optional[str]] = mapped_column(String(20))  # explicit, unclear
 
     # Price analysis
-    market_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
+    market_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))  # Value if working/repaired
+    as_is_value: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))  # Value in current broken state
     estimated_profit: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
     ebay_sold_data: Mapped[Optional[dict]] = mapped_column(JSON)
     # Price status: accurate, similar_prices, no_data, mock_data, user_set
@@ -69,7 +70,11 @@ class Deal(Base):
     repair_feasibility: Mapped[Optional[str]] = mapped_column(String(20))  # easy/moderate/difficult/professional
     repair_notes: Mapped[Optional[str]] = mapped_column(Text)  # AI description of repairs needed
 
-    # Smart repair cost (with eBay parts lookup)
+    # Multiple repair options (toggleable by user)
+    # Format: [{"id": "screen", "name": "Screen Replacement", "part_cost": 89.99, "labor_hours": 2, "part_url": "..."}]
+    repair_options: Mapped[Optional[list]] = mapped_column(JSON)
+
+    # Legacy single repair fields (kept for backwards compatibility)
     repair_part_needed: Mapped[Optional[str]] = mapped_column(String(200))  # "iPhone 14 Pro Max screen"
     repair_part_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
     repair_part_url: Mapped[Optional[str]] = mapped_column(Text)  # Clickable eBay link to part
@@ -138,6 +143,18 @@ class Flip(Base):
     # Status: active = Current Flips, sold = Profits
     status: Mapped[str] = mapped_column(String(20), default="active")
 
+    # eBay listing tracking
+    listed_at: Mapped[Optional[datetime]] = mapped_column(DateTime)  # When listed on eBay
+    ebay_listing_id: Mapped[Optional[str]] = mapped_column(String(50))  # eBay item ID
+    listing_status: Mapped[Optional[str]] = mapped_column(String(20))  # draft, active, ended
+
+    # Repair tracking (for items that needed repair)
+    # Format: [{"id": "screen", "name": "Screen Replacement", "part_cost": 89.99, "labor_hours": 2}]
+    planned_repairs: Mapped[Optional[list]] = mapped_column(JSON)  # Repairs intended at purchase
+    completed_repairs: Mapped[Optional[list]] = mapped_column(JSON)  # Repairs actually done
+    sold_as_repaired: Mapped[Optional[bool]] = mapped_column(default=None)  # True=repaired, False=as-is
+    actual_repair_cost: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))  # What repairs actually cost
+
     # Sale info (filled when sold)
     sell_price: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
     sell_date: Mapped[Optional[date]] = mapped_column(Date)
@@ -145,7 +162,7 @@ class Flip(Base):
     fees_paid: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
     shipping_cost: Mapped[Decimal] = mapped_column(Numeric(10, 2), default=0)
 
-    # Calculated profit (sell_price - buy_price - fees - shipping)
+    # Calculated profit (sell_price - buy_price - fees - shipping - repair_cost)
     profit: Mapped[Optional[Decimal]] = mapped_column(Numeric(10, 2))
 
     notes: Mapped[Optional[str]] = mapped_column(Text)

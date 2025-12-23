@@ -10,21 +10,44 @@ import {
   Modal,
   TextInput,
   Image,
+  ScrollView,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
+import * as Clipboard from 'expo-clipboard';
+import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api, Flip } from '../services/api';
 import { useEbay } from '../contexts/EbayContext';
 
+interface ListingSuggestion {
+  deal_id: number;
+  suggested_title: string;
+  description: string;
+  ebay_category: { category_id: number; category_name: string; category_key: string };
+  testing_checklist: string[];
+}
+
 export default function CurrentFlipsScreen() {
+  const navigation = useNavigation<any>();
   const [flips, setFlips] = useState<Flip[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [syncing, setSyncing] = useState(false);
   const [sellModal, setSellModal] = useState<{ visible: boolean; flip: Flip | null }>({
     visible: false,
     flip: null,
   });
   const [sellPrice, setSellPrice] = useState('');
   const [sellPlatform, setSellPlatform] = useState<string | null>(null);
+  const [listingModal, setListingModal] = useState<{
+    visible: boolean;
+    flip: Flip | null;
+    loading: boolean;
+    suggestion: ListingSuggestion | null;
+  }>({
+    visible: false,
+    flip: null,
+    loading: false,
+    suggestion: null,
+  });
 
   // Get eBay fee from context
   const { feePercentage } = useEbay();
@@ -54,10 +77,99 @@ export default function CurrentFlipsScreen() {
     loadFlips();
   };
 
+  const handleSyncEbay = async () => {
+    setSyncing(true);
+    try {
+      const result = await api.syncEbayOrders();
+      if (result.success && result.synced > 0) {
+        Alert.alert(
+          'Sales Synced!',
+          `${result.synced} item(s) marked as sold from eBay.`,
+          [{ text: 'OK', onPress: loadFlips }]
+        );
+      } else if (result.success) {
+        Alert.alert('No New Sales', 'No new eBay sales detected.');
+      } else {
+        Alert.alert('Sync Failed', result.error || 'Could not sync eBay orders');
+      }
+    } catch (error) {
+      console.error('eBay sync error:', error);
+      Alert.alert('Error', 'Failed to sync eBay orders');
+    } finally {
+      setSyncing(false);
+    }
+  };
+
   const calculateDaysHeld = (buyDate: string): number => {
     const buy = new Date(buyDate);
     const now = new Date();
     return Math.floor((now.getTime() - buy.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const calculateDaysListed = (listedAt: string): number => {
+    const listed = new Date(listedAt);
+    const now = new Date();
+    return Math.floor((now.getTime() - listed.getTime()) / (1000 * 60 * 60 * 24));
+  };
+
+  const handleListItem = (flip: Flip) => {
+    navigation.navigate('ListItem', { flip });
+  };
+
+  const handleListOnFacebook = async (flip: Flip) => {
+    setListingModal({ visible: true, flip, loading: true, suggestion: null });
+
+    try {
+      // Use flip endpoint if available, otherwise fall back to deal endpoint
+      let suggestion;
+      if (flip.deal_id) {
+        suggestion = await api.getFlipListingSuggestion(flip.id);
+      } else {
+        // For manually added flips, create basic listing text
+        suggestion = {
+          suggested_title: flip.item_name,
+          description: `${flip.item_name}\n\nCondition: Used\nPrice: Negotiable`,
+          testing_checklist: [],
+        };
+      }
+      setListingModal(prev => ({ ...prev, loading: false, suggestion }));
+    } catch (error) {
+      console.error('Failed to generate FB listing:', error);
+      // Fallback to basic listing
+      setListingModal(prev => ({
+        ...prev,
+        loading: false,
+        suggestion: {
+          suggested_title: flip.item_name,
+          description: flip.item_name,
+          ebay_category: { category_id: 0, category_name: '', category_key: '' },
+          testing_checklist: [],
+        },
+      }));
+    }
+  };
+
+  const copyForFacebook = async () => {
+    if (!listingModal.suggestion || !listingModal.flip) return;
+    const { suggested_title, description } = listingModal.suggestion;
+    const price = listingModal.flip.buy_price * 1.5; // Suggest 50% markup as starting point
+
+    const fbText = `${suggested_title}
+
+${description}
+
+Price: $${price.toFixed(0)} OBO
+Condition: Used - Excellent
+Pickup available
+
+Message me with any questions!`;
+
+    await Clipboard.setStringAsync(fbText);
+    Alert.alert(
+      'Copied for Facebook!',
+      'Listing text copied. Open Facebook Marketplace and paste into your new listing.',
+      [{ text: 'OK', onPress: () => setListingModal({ visible: false, flip: null, loading: false, suggestion: null }) }]
+    );
   };
 
   const handleSell = (flip: Flip) => {
@@ -114,16 +226,50 @@ export default function CurrentFlipsScreen() {
     );
   };
 
+  const handleGenerateListing = async (flip: Flip) => {
+    if (!flip.deal_id) {
+      Alert.alert('Cannot Generate', 'This item was added manually and has no deal data for listing generation.');
+      return;
+    }
+
+    setListingModal({ visible: true, flip, loading: true, suggestion: null });
+
+    try {
+      const suggestion = await api.getListingSuggestion(flip.deal_id);
+      setListingModal(prev => ({ ...prev, loading: false, suggestion }));
+    } catch (error) {
+      console.error('Failed to generate listing:', error);
+      setListingModal(prev => ({ ...prev, loading: false }));
+      Alert.alert('Error', 'Failed to generate listing suggestion');
+    }
+  };
+
+  const copyToClipboard = async (text: string, label: string) => {
+    await Clipboard.setStringAsync(text);
+    Alert.alert('Copied!', `${label} copied to clipboard`);
+  };
+
+  const copyFullListing = async () => {
+    if (!listingModal.suggestion) return;
+    const { suggested_title, description, testing_checklist } = listingModal.suggestion;
+    const fullText = `${suggested_title}\n\n${description}\n\nTesting Checklist:\n${testing_checklist.map(item => `• ${item}`).join('\n')}`;
+    await Clipboard.setStringAsync(fullText);
+    Alert.alert('Copied!', 'Full listing copied to clipboard');
+  };
+
   const totalInventoryValue = flips.reduce(
     (sum, f) => sum + (Number(f.buy_price) || 0),
     0
   );
 
   const renderFlipItem = ({ item }: { item: Flip }) => {
-    const daysHeld = calculateDaysHeld(item.buy_date);
+    const isListed = !!item.listed_at;
+    const daysCount = isListed
+      ? calculateDaysListed(item.listed_at!)
+      : calculateDaysHeld(item.buy_date);
 
     return (
-      <View style={styles.flipCard}>
+      <View style={[styles.flipCard, isListed && styles.flipCardListed]}>
         <View style={styles.flipHeader}>
           {/* Thumbnail */}
           {item.image_url ? (
@@ -148,11 +294,37 @@ export default function CurrentFlipsScreen() {
               <Text style={styles.source}>{item.buy_source || 'Unknown'}</Text>
             </View>
           </View>
-          <Text style={styles.daysHeld}>{daysHeld}d</Text>
+          <View style={styles.statusBadge}>
+            {isListed ? (
+              <>
+                <Text style={styles.listedBadge}>LISTED</Text>
+                <Text style={styles.daysListed}>{daysCount}d</Text>
+              </>
+            ) : (
+              <Text style={styles.notListedBadge}>NOT LISTED</Text>
+            )}
+          </View>
         </View>
 
         {item.category && (
           <Text style={styles.category}>{item.category}</Text>
+        )}
+
+        {/* eBay listing link if listed */}
+        {item.ebay_listing_id && (
+          <Text style={styles.ebayLink}>
+            eBay: {item.ebay_listing_id}
+          </Text>
+        )}
+
+        {/* Planned repairs if any */}
+        {item.planned_repairs && item.planned_repairs.length > 0 && (
+          <View style={styles.plannedRepairs}>
+            <Text style={styles.plannedRepairsLabel}>Planned Repairs:</Text>
+            <Text style={styles.plannedRepairsList}>
+              {item.planned_repairs.map((r: any) => r.name).join(', ')}
+            </Text>
+          </View>
         )}
 
         <View style={styles.flipActions}>
@@ -162,11 +334,27 @@ export default function CurrentFlipsScreen() {
           >
             <Text style={styles.deleteBtnText}>Delete</Text>
           </TouchableOpacity>
+          {!isListed && (
+            <>
+              <TouchableOpacity
+                style={styles.listingBtn}
+                onPress={() => handleListItem(item)}
+              >
+                <Text style={styles.listingBtnText}>eBay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.fbListingBtn}
+                onPress={() => handleListOnFacebook(item)}
+              >
+                <Text style={styles.fbListingBtnText}>FB</Text>
+              </TouchableOpacity>
+            </>
+          )}
           <TouchableOpacity
             style={styles.sellBtn}
             onPress={() => handleSell(item)}
           >
-            <Text style={styles.sellBtnText}>Mark Sold</Text>
+            <Text style={styles.sellBtnText}>Sold</Text>
           </TouchableOpacity>
         </View>
       </View>
@@ -184,11 +372,22 @@ export default function CurrentFlipsScreen() {
   return (
     <View style={styles.container}>
       <View style={styles.summaryBar}>
-        <Text style={styles.summaryLabel}>Total Inventory Value</Text>
-        <Text style={styles.summaryValue}>
-          ${totalInventoryValue.toFixed(2)}
-        </Text>
-        <Text style={styles.summaryCount}>{flips.length} items</Text>
+        <View style={styles.summaryRow}>
+          <View style={styles.summaryContent}>
+            <Text style={styles.summaryLabel}>Total Inventory Value</Text>
+            <Text style={styles.summaryValue}>
+              ${totalInventoryValue.toFixed(2)}
+            </Text>
+            <Text style={styles.summaryCount}>{flips.length} items</Text>
+          </View>
+          <TouchableOpacity
+            style={[styles.syncBtn, syncing && styles.syncBtnDisabled]}
+            onPress={handleSyncEbay}
+            disabled={syncing}
+          >
+            <Text style={styles.syncBtnText}>{syncing ? 'Syncing...' : 'Sync eBay'}</Text>
+          </TouchableOpacity>
+        </View>
       </View>
 
       <FlatList
@@ -276,6 +475,82 @@ export default function CurrentFlipsScreen() {
           </View>
         </View>
       </Modal>
+
+      {/* Facebook Listing Modal */}
+      <Modal
+        visible={listingModal.visible}
+        transparent
+        animationType="fade"
+        onRequestClose={() => setListingModal({ visible: false, flip: null, loading: false, suggestion: null })}
+      >
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, styles.listingModalContent]}>
+            <View style={styles.listingHeader}>
+              <Text style={styles.modalTitle}>List on Facebook</Text>
+              <TouchableOpacity
+                style={styles.closeBtn}
+                onPress={() => setListingModal({ visible: false, flip: null, loading: false, suggestion: null })}
+              >
+                <Text style={styles.closeBtnText}>✕</Text>
+              </TouchableOpacity>
+            </View>
+
+            {listingModal.loading ? (
+              <View style={styles.listingLoading}>
+                <Text style={styles.listingLoadingText}>Generating listing...</Text>
+              </View>
+            ) : listingModal.suggestion ? (
+              <ScrollView style={styles.listingScroll} showsVerticalScrollIndicator={false}>
+                <Text style={styles.fbInstructions}>
+                  Facebook Marketplace doesn't have an API, so we'll copy the listing text for you to paste.
+                </Text>
+
+                {/* Preview */}
+                <View style={styles.listingSection}>
+                  <Text style={styles.listingSectionLabel}>Preview</Text>
+                  <View style={styles.fbPreviewBox}>
+                    <Text style={styles.fbPreviewTitle}>
+                      {listingModal.suggestion.suggested_title}
+                    </Text>
+                    <Text style={styles.fbPreviewDescription}>
+                      {listingModal.suggestion.description}
+                    </Text>
+                    <Text style={styles.fbPreviewPrice}>
+                      Price: ${((listingModal.flip?.buy_price || 0) * 1.5).toFixed(0)} OBO
+                    </Text>
+                  </View>
+                </View>
+
+                {/* Testing Checklist */}
+                {listingModal.suggestion.testing_checklist && listingModal.suggestion.testing_checklist.length > 0 && (
+                  <View style={styles.listingSection}>
+                    <Text style={styles.listingSectionLabel}>Test Before Posting</Text>
+                    {listingModal.suggestion.testing_checklist.map((item, index) => (
+                      <View key={index} style={styles.checklistItem}>
+                        <Text style={styles.checklistBullet}>☐</Text>
+                        <Text style={styles.checklistText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                )}
+
+                {/* Copy Button */}
+                <TouchableOpacity style={styles.fbCopyBtn} onPress={copyForFacebook}>
+                  <Text style={styles.fbCopyBtnText}>Copy & Open Facebook</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.fbNote}>
+                  You'll need to add photos manually in Facebook Marketplace
+                </Text>
+              </ScrollView>
+            ) : (
+              <View style={styles.listingLoading}>
+                <Text style={styles.listingLoadingText}>Failed to load listing</Text>
+              </View>
+            )}
+          </View>
+        </View>
+      </Modal>
     </View>
   );
 }
@@ -307,9 +582,30 @@ const styles = StyleSheet.create({
   summaryBar: {
     backgroundColor: '#1a1a2e',
     padding: 16,
-    alignItems: 'center',
     borderBottomWidth: 1,
     borderBottomColor: '#333',
+  },
+  summaryRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  summaryContent: {
+    flex: 1,
+  },
+  syncBtn: {
+    backgroundColor: '#1877F2',
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 8,
+  },
+  syncBtnDisabled: {
+    backgroundColor: '#333',
+  },
+  syncBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+    fontSize: 13,
   },
   summaryLabel: {
     color: '#888',
@@ -332,6 +628,10 @@ const styles = StyleSheet.create({
     padding: 16,
     margin: 8,
     marginHorizontal: 16,
+  },
+  flipCardListed: {
+    borderWidth: 1,
+    borderColor: '#4ecca3',
   },
   flipHeader: {
     flexDirection: 'row',
@@ -374,6 +674,37 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 4,
     borderRadius: 4,
+  },
+  statusBadge: {
+    alignItems: 'flex-end',
+  },
+  listedBadge: {
+    color: '#4ecca3',
+    fontSize: 10,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(78, 204, 163, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  daysListed: {
+    color: '#4ecca3',
+    fontSize: 12,
+    marginTop: 4,
+  },
+  notListedBadge: {
+    color: '#ff9800',
+    fontSize: 10,
+    fontWeight: 'bold',
+    backgroundColor: 'rgba(255, 152, 0, 0.2)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+    borderRadius: 4,
+  },
+  ebayLink: {
+    color: '#1877F2',
+    fontSize: 12,
+    marginBottom: 8,
   },
   flipDetails: {
     flexDirection: 'row',
@@ -510,5 +841,195 @@ const styles = StyleSheet.create({
   modalConfirmText: {
     color: '#000',
     fontWeight: '600',
+  },
+  // Listing button styles
+  listingBtn: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#1877F2',
+  },
+  listingBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  // Planned repairs styles
+  plannedRepairs: {
+    backgroundColor: 'rgba(255,152,0,0.1)',
+    borderRadius: 6,
+    padding: 8,
+    marginBottom: 12,
+  },
+  plannedRepairsLabel: {
+    color: '#ff9800',
+    fontSize: 11,
+    fontWeight: '600',
+  },
+  plannedRepairsList: {
+    color: '#fff',
+    fontSize: 12,
+    marginTop: 2,
+  },
+  // Listing modal styles
+  listingModalContent: {
+    maxHeight: '80%',
+    width: '90%',
+  },
+  listingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 16,
+  },
+  closeBtn: {
+    padding: 4,
+  },
+  closeBtnText: {
+    color: '#888',
+    fontSize: 24,
+  },
+  listingLoading: {
+    padding: 40,
+    alignItems: 'center',
+  },
+  listingLoadingText: {
+    color: '#888',
+    fontSize: 16,
+  },
+  listingScroll: {
+    maxHeight: 500,
+  },
+  listingSection: {
+    marginBottom: 20,
+  },
+  listingSectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: 8,
+  },
+  listingSectionLabel: {
+    color: '#888',
+    fontSize: 12,
+    fontWeight: '600',
+    textTransform: 'uppercase',
+    marginBottom: 6,
+  },
+  copyBtn: {
+    color: '#4ecca3',
+    fontSize: 12,
+    fontWeight: '600',
+  },
+  listingCategory: {
+    color: '#4ecca3',
+    fontSize: 14,
+  },
+  listingTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    lineHeight: 22,
+  },
+  charCount: {
+    color: '#666',
+    fontSize: 11,
+    marginTop: 4,
+  },
+  listingDescription: {
+    color: '#ddd',
+    fontSize: 14,
+    lineHeight: 20,
+  },
+  checklistItem: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    marginBottom: 8,
+  },
+  checklistBullet: {
+    color: '#888',
+    fontSize: 16,
+    marginRight: 8,
+  },
+  checklistText: {
+    color: '#fff',
+    fontSize: 14,
+    flex: 1,
+    lineHeight: 20,
+  },
+  copyAllBtn: {
+    backgroundColor: '#4ecca3',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+    marginBottom: 20,
+  },
+  copyAllBtnText: {
+    color: '#000',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  // Facebook listing styles
+  fbListingBtn: {
+    flex: 1,
+    padding: 10,
+    borderRadius: 8,
+    alignItems: 'center',
+    backgroundColor: '#1877F2',
+  },
+  fbListingBtnText: {
+    color: '#fff',
+    fontWeight: '600',
+  },
+  fbInstructions: {
+    color: '#888',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 16,
+    textAlign: 'center',
+  },
+  fbPreviewBox: {
+    backgroundColor: '#0f0f1a',
+    borderRadius: 8,
+    padding: 14,
+    borderWidth: 1,
+    borderColor: '#333',
+  },
+  fbPreviewTitle: {
+    color: '#fff',
+    fontSize: 16,
+    fontWeight: '600',
+    marginBottom: 8,
+  },
+  fbPreviewDescription: {
+    color: '#ccc',
+    fontSize: 14,
+    lineHeight: 20,
+    marginBottom: 8,
+  },
+  fbPreviewPrice: {
+    color: '#4ecca3',
+    fontSize: 16,
+    fontWeight: 'bold',
+  },
+  fbCopyBtn: {
+    backgroundColor: '#1877F2',
+    padding: 14,
+    borderRadius: 8,
+    alignItems: 'center',
+    marginTop: 8,
+  },
+  fbCopyBtnText: {
+    color: '#fff',
+    fontWeight: 'bold',
+    fontSize: 16,
+  },
+  fbNote: {
+    color: '#666',
+    fontSize: 12,
+    textAlign: 'center',
+    marginTop: 12,
+    marginBottom: 16,
   },
 });

@@ -29,6 +29,7 @@ from .services.profit_calculator import (
 )
 from .services.notifications import get_notification_service
 from .services.location import calculate_distance_from_home, is_within_pickup_range, LOCAL_RADIUS_MILES
+from .services.ebay_orders import sync_sold_items
 
 settings = get_settings()
 scheduler = AsyncIOScheduler()
@@ -311,6 +312,35 @@ async def check_needs_review() -> None:
         print(f"[{datetime.now()}] Error checking needs review: {e}")
 
 
+async def sync_ebay_orders() -> None:
+    """
+    Sync eBay orders to auto-detect sold items.
+
+    Runs every 30 minutes to:
+    1. Fetch recent eBay orders
+    2. Match with active flips by ebay_listing_id
+    3. Mark matched items as sold with actual sale price
+    """
+    print(f"[{datetime.now()}] Syncing eBay orders...")
+
+    try:
+        async with async_session() as db:
+            result = await sync_sold_items(db)
+
+            if result["success"]:
+                if result["synced"] > 0:
+                    print(f"[{datetime.now()}] Synced {result['synced']} sold items from eBay")
+                    for item in result.get("items", []):
+                        print(f"  - {item['item_name']}: ${item['sell_price']:.2f} (profit: ${item['profit']:.2f})")
+                else:
+                    print(f"[{datetime.now()}] No new sales to sync")
+            else:
+                print(f"[{datetime.now()}] eBay sync error: {result.get('error', 'Unknown error')}")
+
+    except Exception as e:
+        print(f"[{datetime.now()}] Error syncing eBay orders: {e}")
+
+
 def start_scheduler() -> None:
     """Start the background scheduler."""
     # Check for new emails every 5 minutes
@@ -328,6 +358,15 @@ def start_scheduler() -> None:
         "interval",
         minutes=settings.needs_review_check_interval,
         id="check_needs_review",
+        replace_existing=True,
+    )
+
+    # Sync eBay orders every 30 minutes
+    scheduler.add_job(
+        sync_ebay_orders,
+        "interval",
+        minutes=30,
+        id="sync_ebay_orders",
         replace_existing=True,
     )
 

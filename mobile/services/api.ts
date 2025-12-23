@@ -5,6 +5,17 @@
 // Configure this to your backend URL
 const API_URL = 'https://dealscout.junipr.io/api';
 
+export interface RepairOption {
+  id: string;
+  name: string;
+  part_cost: number;
+  labor_hours: number;
+  part_url?: string;
+  // Price status for parts
+  price_status?: 'found' | 'not_found' | 'labor_only' | 'user_set';
+  price_note?: string; // Why price couldn't be found
+}
+
 export interface Deal {
   id: number;
   title: string;
@@ -21,7 +32,8 @@ export interface Deal {
   item_details: Record<string, any> | null;
   condition: string | null; // new, used, needs_repair, unknown
   condition_confidence: string | null;
-  market_value: number | null;
+  market_value: number | null; // Value if working/repaired
+  as_is_value: number | null; // Value in current broken state (for repair items)
   estimated_profit: number | null;
   ebay_sold_data: Record<string, any> | null;
   price_status: string | null; // accurate, similar_prices, limited_data, no_data, mock_data, user_set
@@ -34,6 +46,9 @@ export interface Deal {
   repair_keywords: string[] | null;
   repair_feasibility: string | null; // easy, moderate, difficult, professional
   repair_notes: string | null;
+  // Multiple repair options (toggleable)
+  repair_options: RepairOption[] | null;
+  // Legacy single repair fields
   repair_part_needed: string | null;
   repair_part_cost: number | null;
   repair_part_url: string | null;
@@ -84,6 +99,16 @@ export interface Flip {
   buy_date: string;
   buy_source: string | null;
   status: string;
+  // eBay listing tracking
+  listed_at: string | null;
+  ebay_listing_id: string | null;
+  listing_status: string | null; // draft, active, ended
+  // Repair tracking
+  planned_repairs: RepairOption[] | null;
+  completed_repairs: RepairOption[] | null;
+  sold_as_repaired: boolean | null;
+  actual_repair_cost: number | null;
+  // Sale info
   sell_price: number | null;
   sell_date: string | null;
   sell_platform: string | null;
@@ -193,9 +218,49 @@ class ApiService {
     return this.request(`/deals/${id}/listing-suggestion`);
   }
 
+  async getFlipListingSuggestion(flipId: number): Promise<{
+    flip_id: number;
+    suggested_title: string;
+    description: string;
+    ebay_category: { category_id: number; category_name: string; category_key: string };
+    testing_checklist: string[];
+  }> {
+    return this.request(`/flips/${flipId}/listing-suggestion`);
+  }
+
+  async createEbayListing(
+    flipId: number,
+    data: {
+      title: string;
+      description: string;
+      category_id: string;
+      price: number;
+      condition?: string;
+      image_urls?: string[];
+    }
+  ): Promise<{
+    success: boolean;
+    flip_id: number;
+    ebay_listing_id?: string;
+    ebay_url?: string;
+    message?: string;
+    error?: string;
+    requires_manual_listing?: boolean;
+  }> {
+    return this.request(`/flips/${flipId}/list`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    });
+  }
+
   async purchaseDeal(
     id: number,
-    data: { buy_price: number; buy_date: string; notes?: string }
+    data: {
+      buy_price: number;
+      buy_date: string;
+      notes?: string;
+      planned_repairs?: RepairOption[];
+    }
   ): Promise<Flip> {
     return this.request(`/deals/${id}/purchase`, {
       method: 'POST',
@@ -374,6 +439,17 @@ class ApiService {
 
   async getEbayFee(): Promise<{ fee_percentage: number }> {
     return this.request('/ebay/fee');
+  }
+
+  // eBay order sync
+  async syncEbayOrders(): Promise<{
+    success: boolean;
+    synced: number;
+    items?: Array<{ flip_id: number; item_name: string; sell_price: number; profit: number }>;
+    error?: string;
+    orders_checked?: number;
+  }> {
+    return this.request('/flips/sync-ebay-orders', { method: 'POST' });
   }
 }
 

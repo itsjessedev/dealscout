@@ -75,7 +75,8 @@ class DealResponse(DealBase):
     item_details: Optional[dict] = None
     condition: Optional[str] = None  # new, used, needs_repair, unknown
     condition_confidence: Optional[str] = None
-    market_value: Optional[Decimal] = None
+    market_value: Optional[Decimal] = None  # Value if working/repaired
+    as_is_value: Optional[Decimal] = None  # Value in current broken state (for repair items)
     estimated_profit: Optional[Decimal] = None
     ebay_sold_data: Optional[dict] = None
     price_status: Optional[str] = None  # accurate, similar_prices, no_data, mock_data, user_set
@@ -89,7 +90,11 @@ class DealResponse(DealBase):
     repair_feasibility: Optional[str] = None  # easy/moderate/difficult/professional
     repair_notes: Optional[str] = None
 
-    # Smart repair cost (with eBay parts lookup)
+    # Multiple repair options (toggleable)
+    # Format: [{"id": "screen", "name": "Screen Replacement", "part_cost": 89.99, "labor_hours": 2, "part_url": "..."}]
+    repair_options: Optional[list[dict]] = None
+
+    # Legacy single repair fields
     repair_part_needed: Optional[str] = None  # "iPhone 14 Pro Max screen"
     repair_part_cost: Optional[Decimal] = None
     repair_part_url: Optional[str] = None  # Clickable eBay link to part
@@ -165,6 +170,8 @@ class FlipFromDeal(BaseModel):
     buy_price: Decimal
     buy_date: date
     notes: Optional[str] = None
+    # For repair items: which repairs do you plan to do?
+    planned_repairs: Optional[list[dict]] = None  # [{"id": "screen", "name": "...", "part_cost": X, "labor_hours": Y}]
 
 
 class FlipSell(BaseModel):
@@ -174,6 +181,10 @@ class FlipSell(BaseModel):
     sell_platform: str  # ebay, local, facebook, etc.
     fees_paid: Decimal = Decimal("0")
     shipping_cost: Decimal = Decimal("0")
+    # For repair items: did you repair it or sell as-is?
+    sold_as_repaired: Optional[bool] = None  # True=repaired (sell as used), False=as-is (sell for parts)
+    completed_repairs: Optional[list[dict]] = None  # Which repairs were actually done
+    actual_repair_cost: Optional[Decimal] = None  # What repairs actually cost
 
 
 class FlipUpdate(BaseModel):
@@ -191,6 +202,16 @@ class FlipResponse(FlipBase):
     id: int
     deal_id: Optional[int] = None
     status: str
+    # eBay listing tracking
+    listed_at: Optional[datetime] = None
+    ebay_listing_id: Optional[str] = None
+    listing_status: Optional[str] = None  # draft, active, ended
+    # Repair tracking
+    planned_repairs: Optional[list[dict]] = None
+    completed_repairs: Optional[list[dict]] = None
+    sold_as_repaired: Optional[bool] = None
+    actual_repair_cost: Optional[Decimal] = None
+    # Sale info
     sell_price: Optional[Decimal] = None
     sell_date: Optional[date] = None
     sell_platform: Optional[str] = None

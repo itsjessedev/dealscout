@@ -10,7 +10,11 @@ import {
 } from 'react-native';
 import { useAuth } from '../contexts/AuthContext';
 
-export default function LoginScreen() {
+interface LoginScreenProps {
+  onSkip?: () => void;
+}
+
+export default function LoginScreen({ onSkip }: LoginScreenProps) {
   const { login, isLoading } = useAuth();
   const [isAuthenticating, setIsAuthenticating] = useState(false);
 
@@ -66,6 +70,12 @@ export default function LoginScreen() {
         <Text style={styles.disclaimer}>
           We use eBay authentication to verify your account and provide personalized deal recommendations.
         </Text>
+
+        {onSkip && (
+          <TouchableOpacity style={styles.skipButton} onPress={onSkip}>
+            <Text style={styles.skipButtonText}>Skip for Now</Text>
+          </TouchableOpacity>
+        )}
       </View>
     </View>
   );
@@ -129,5 +139,14 @@ const styles = StyleSheet.create({
     color: '#888',
     marginTop: 16,
     fontSize: 16,
+  },
+  skipButton: {
+    marginTop: 24,
+    padding: 12,
+  },
+  skipButtonText: {
+    color: '#666',
+    fontSize: 14,
+    textDecorationLine: 'underline',
   },
 });
