@@ -17,6 +17,7 @@ import {
 import { useNavigation, useRoute, RouteProp } from '@react-navigation/native';
 import ImageViewer from 'react-native-image-zoom-viewer';
 import { api, Deal } from '../services/api';
+import { useEbay } from '../contexts/EbayContext';
 
 const { width: SCREEN_WIDTH } = Dimensions.get('window');
 
@@ -44,10 +45,13 @@ export default function DealDetailScreen() {
       ? [deal.image_url]
       : [];
 
+  // Get eBay fee from context (loaded on app launch)
+  const { feePercentage } = useEbay();
+  const ebayFeeRate = feePercentage / 100; // Convert to decimal
+
   // Calculate profits for different platforms
   const marketValue = Number(deal.market_value) || 0;
   const askingPrice = Number(deal.asking_price) || 0;
-  const ebayFeeRate = 0.13; // 13% eBay fees
 
   const ebayProfit = marketValue - askingPrice - (marketValue * ebayFeeRate);
   const facebookProfit = marketValue - askingPrice; // No fees
@@ -81,7 +85,7 @@ export default function DealDetailScreen() {
       const newAskingPrice = Number(updatedDeal.asking_price) || 0;
 
       // Calculate platform-specific profits
-      const newEbayProfit = newMarketValue - newAskingPrice - (newMarketValue * 0.13);
+      const newEbayProfit = newMarketValue - newAskingPrice - (newMarketValue * ebayFeeRate);
       const newFacebookProfit = newMarketValue - newAskingPrice;
 
       if (newFacebookProfit <= 0) {

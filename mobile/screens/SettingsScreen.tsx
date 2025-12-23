@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   View,
   Text,
@@ -10,38 +10,22 @@ import {
   ScrollView,
   Linking,
 } from 'react-native';
-import { useFocusEffect } from '@react-navigation/native';
 import { api } from '../services/api';
 import { scheduleDemoNotification } from '../services/notifications';
-
-interface EbayStatus {
-  linked: boolean;
-  auth_url?: string;
-  username?: string;
-  store_tier?: string;
-  fee_percentage?: number;
-  token_valid?: boolean;
-  last_updated?: string;
-}
+import { useEbay } from '../contexts/EbayContext';
 
 export default function SettingsScreen() {
   const [profitThreshold, setProfitThreshold] = useState('30');
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
   const [loading, setLoading] = useState(true);
-  const [ebayStatus, setEbayStatus] = useState<EbayStatus | null>(null);
   const [ebayLoading, setEbayLoading] = useState(false);
 
-  // Load settings on mount
+  // Use shared eBay context (loaded on app launch)
+  const { status: ebayStatus, feePercentage: currentFee, refresh: refreshEbay } = useEbay();
+
   useEffect(() => {
     loadSettings();
   }, []);
-
-  // Refresh eBay status every time screen comes into focus
-  useFocusEffect(
-    useCallback(() => {
-      loadEbayStatus();
-    }, [])
-  );
 
   const loadSettings = async () => {
     try {
@@ -55,15 +39,6 @@ export default function SettingsScreen() {
     }
   };
 
-  const loadEbayStatus = async () => {
-    try {
-      const status = await api.getEbayStatus();
-      setEbayStatus(status);
-    } catch (error) {
-      console.error('Failed to load eBay status:', error);
-    }
-  };
-
   const handleLinkEbay = async () => {
     try {
       setEbayLoading(true);
@@ -71,7 +46,7 @@ export default function SettingsScreen() {
       if (auth_url) {
         await Linking.openURL(auth_url);
         // After returning, refresh status
-        setTimeout(() => loadEbayStatus(), 2000);
+        setTimeout(() => refreshEbay(), 2000);
       }
     } catch (error) {
       Alert.alert('Error', 'Failed to start eBay authorization');
@@ -84,7 +59,7 @@ export default function SettingsScreen() {
     try {
       setEbayLoading(true);
       await api.refreshEbayInfo();
-      await loadEbayStatus();
+      await refreshEbay();
       Alert.alert('Success', 'eBay account info refreshed');
     } catch (error) {
       Alert.alert('Error', 'Failed to refresh eBay info');
@@ -105,7 +80,7 @@ export default function SettingsScreen() {
           onPress: async () => {
             try {
               await api.unlinkEbayAccount();
-              setEbayStatus({ linked: false });
+              await refreshEbay();
               Alert.alert('Success', 'eBay account unlinked');
             } catch (error) {
               Alert.alert('Error', 'Failed to unlink eBay account');
@@ -115,8 +90,6 @@ export default function SettingsScreen() {
       ]
     );
   };
-
-  const currentFee = ebayStatus?.fee_percentage || 13;
 
   const saveSettings = async () => {
     try {

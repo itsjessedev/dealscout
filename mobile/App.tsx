@@ -3,7 +3,7 @@ import { StatusBar } from 'expo-status-bar';
 import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import { createNativeStackNavigator } from '@react-navigation/native-stack';
-import { Text, View, Platform } from 'react-native';
+import { Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import Constants from 'expo-constants';
 import * as Notifications from 'expo-notifications';
@@ -14,6 +14,7 @@ import CurrentFlipsScreen from './screens/CurrentFlipsScreen';
 import ProfitsScreen from './screens/ProfitsScreen';
 import SettingsScreen from './screens/SettingsScreen';
 import { registerForPushNotifications } from './services/notifications';
+import { EbayProvider } from './contexts/EbayContext';
 
 const Tab = createBottomTabNavigator();
 const Stack = createNativeStackNavigator();
@@ -73,9 +74,10 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <NavigationContainer>
-        <StatusBar style="light" />
-        <Tab.Navigator
+      <EbayProvider>
+        <NavigationContainer>
+          <StatusBar style="light" />
+          <Tab.Navigator
         screenOptions={{
           headerStyle: { backgroundColor: '#1a1a2e' },
           headerTintColor: '#fff',
@@ -113,8 +115,9 @@ export default function App() {
             tabBarIcon: ({ color }) => <TabIcon name="⚙" color={color} />,
           }}
         />
-        </Tab.Navigator>
-      </NavigationContainer>
+          </Tab.Navigator>
+        </NavigationContainer>
+      </EbayProvider>
     </SafeAreaProvider>
   );
 }

@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { useFocusEffect } from '@react-navigation/native';
 import { api, Flip } from '../services/api';
+import { useEbay } from '../contexts/EbayContext';
 
 export default function CurrentFlipsScreen() {
   const [flips, setFlips] = useState<Flip[]>([]);
@@ -24,6 +25,10 @@ export default function CurrentFlipsScreen() {
   });
   const [sellPrice, setSellPrice] = useState('');
   const [sellPlatform, setSellPlatform] = useState<string | null>(null);
+
+  // Get eBay fee from context
+  const { feePercentage } = useEbay();
+  const ebayFeeRate = feePercentage / 100;
 
   const loadFlips = useCallback(async () => {
     try {
@@ -65,9 +70,9 @@ export default function CurrentFlipsScreen() {
     if (!sellModal.flip || !sellPrice || !sellPlatform) return;
 
     try {
-      // Calculate fees (eBay ~13%, others 0)
+      // Calculate fees (eBay uses actual rate from account, others 0)
       const price = parseFloat(sellPrice);
-      const fees = sellPlatform === 'ebay' ? price * 0.13 : 0;
+      const fees = sellPlatform === 'ebay' ? price * ebayFeeRate : 0;
 
       await api.sellFlip(sellModal.flip.id, {
         sell_price: price,

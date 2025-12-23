@@ -14,6 +14,7 @@ import {
 } from 'react-native';
 import { useFocusEffect, useNavigation } from '@react-navigation/native';
 import { api, Deal } from '../services/api';
+import { useEbay } from '../contexts/EbayContext';
 
 // Rickman, TN coordinates
 const HOME_LAT = 36.2667;
@@ -70,6 +71,10 @@ export default function DealsScreen() {
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [locationFilter, setLocationFilter] = useState<LocationFilter>('all');
+
+  // Get eBay fee from context (loaded on app launch)
+  const { feePercentage } = useEbay();
+  const ebayFeeRate = feePercentage / 100; // Convert to decimal (e.g., 13.25 -> 0.1325)
   const [purchaseModal, setPurchaseModal] = useState<{ visible: boolean; deal: Deal | null }>({
     visible: false,
     deal: null,
@@ -136,7 +141,7 @@ export default function DealsScreen() {
       const updatedDeal = await api.updateCondition(deal.id, condition);
       const newMarketValue = Number(updatedDeal.market_value) || 0;
       const newAskingPrice = Number(updatedDeal.asking_price) || 0;
-      const newEbayProfit = newMarketValue - newAskingPrice - (newMarketValue * 0.13);
+      const newEbayProfit = newMarketValue - newAskingPrice - (newMarketValue * ebayFeeRate);
       const newFacebookProfit = newMarketValue - newAskingPrice;
 
       if (newFacebookProfit <= 0) {
@@ -320,7 +325,7 @@ export default function DealsScreen() {
   const renderDealItem = ({ item }: { item: Deal }) => {
     const marketValue = Number(item.market_value) || 0;
     const askingPrice = Number(item.asking_price) || 0;
-    const ebayProfit = marketValue - askingPrice - (marketValue * 0.13);
+    const ebayProfit = marketValue - askingPrice - (marketValue * ebayFeeRate);
     const facebookProfit = marketValue - askingPrice;
     const bestProfit = Math.max(ebayProfit, facebookProfit);
     const isFacebookOnly = ebayProfit <= 0 && facebookProfit > 0;
@@ -425,24 +430,29 @@ export default function DealsScreen() {
     );
   }
 
+  // Render Needs Review section as list header (scrolls with content)
+  const renderListHeader = () => {
+    if (needsReview.length === 0) return null;
+
+    return (
+      <View style={styles.reviewSection}>
+        <Text style={styles.sectionTitle}>
+          Needs Review ({needsReview.length})
+        </Text>
+        <FlatList
+          horizontal
+          data={needsReview}
+          renderItem={renderNeedsReviewItem}
+          keyExtractor={(item) => `review-${item.id}`}
+          showsHorizontalScrollIndicator={false}
+        />
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
-      {needsReview.length > 0 && (
-        <View style={styles.reviewSection}>
-          <Text style={styles.sectionTitle}>
-            Needs Review ({needsReview.length})
-          </Text>
-          <FlatList
-            horizontal
-            data={needsReview}
-            renderItem={renderNeedsReviewItem}
-            keyExtractor={(item) => `review-${item.id}`}
-            showsHorizontalScrollIndicator={false}
-          />
-        </View>
-      )}
-
-      {/* Location Filter Tabs */}
+      {/* Location Filter Tabs - Sticky at top */}
       <View style={styles.filterTabs}>
         <TouchableOpacity
           style={[styles.filterTab, locationFilter === 'all' && styles.filterTabActive]}
@@ -474,6 +484,7 @@ export default function DealsScreen() {
         data={filteredDeals}
         renderItem={renderDealItem}
         keyExtractor={(item) => `deal-${item.id}`}
+        ListHeaderComponent={renderListHeader}
         refreshControl={
           <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
         }
@@ -498,7 +509,7 @@ export default function DealsScreen() {
           const modalDeal = purchaseModal.deal;
           const modalMarketValue = Number(modalDeal?.market_value) || 0;
           const modalAskingPrice = Number(modalDeal?.asking_price) || 0;
-          const modalEbayProfit = modalMarketValue - modalAskingPrice - (modalMarketValue * 0.13);
+          const modalEbayProfit = modalMarketValue - modalAskingPrice - (modalMarketValue * ebayFeeRate);
           const modalFacebookProfit = modalMarketValue - modalAskingPrice;
           const modalIsFacebookOnly = modalEbayProfit <= 0 && modalFacebookProfit > 0;
 
