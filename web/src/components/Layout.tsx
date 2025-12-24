@@ -15,6 +15,14 @@ const Layout = () => {
 
   const isActive = (path: string) => location.pathname === path
 
+  // Get current page title from nav items or path
+  const getPageTitle = () => {
+    const currentNav = navItems.find(item => location.pathname.startsWith(item.path))
+    if (currentNav) return currentNav.label
+    if (location.pathname.startsWith('/list-item')) return 'List Item'
+    return 'DealScout'
+  }
+
   return (
     <div className="layout">
       {/* Sidebar */}
@@ -56,7 +64,7 @@ const Layout = () => {
           >
             ☰
           </button>
-          <h2 className="page-title">DealScout</h2>
+          <h2 className="page-title">{getPageTitle()}</h2>
         </header>
 
         <main className="content">

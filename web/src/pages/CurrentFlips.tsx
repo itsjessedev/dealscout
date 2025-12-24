@@ -10,7 +10,6 @@ export default function CurrentFlips() {
   const { showToast, showSaleNotification } = useToast()
   const [flips, setFlips] = useState<Flip[]>([])
   const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
   const [error, setError] = useState<string | null>(null)
 
   // Sell modal state
@@ -57,18 +56,12 @@ export default function CurrentFlips() {
       console.error(err)
     } finally {
       setLoading(false)
-      setRefreshing(false)
     }
   }, [showSaleNotification])
 
   useEffect(() => {
     loadFlips()
   }, [loadFlips])
-
-  const handleRefresh = async () => {
-    setRefreshing(true)
-    await loadFlips(true) // Show sync notifications on manual refresh
-  }
 
   const calculateDaysHeld = (buyDate: string): number => {
     const buy = new Date(buyDate)
@@ -225,13 +218,6 @@ Message me with any questions!`
 
   return (
     <div className="current-flips-page">
-      <header className="page-header">
-        <h1>Current Flips</h1>
-        <button className="refresh-btn" onClick={handleRefresh} disabled={refreshing}>
-          {refreshing ? 'Refreshing...' : 'Refresh'}
-        </button>
-      </header>
-
       <div className="summary-bar">
         <div className="summary-label">Total Inventory Value</div>
         <div className="summary-value">${totalInventoryValue.toFixed(2)}</div>

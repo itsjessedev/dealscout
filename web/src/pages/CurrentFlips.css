@@ -316,8 +316,8 @@
 }
 
 .sell-btn {
-  flex: 1;
   height: 44px;
+  padding: 0 1.25rem;
   border-radius: 8px;
   border: none;
   background: #4ecca3;

@@ -80,10 +80,6 @@ export default function Profits() {
 
   return (
     <div className="profits-page">
-      <header className="page-header">
-        <h1>Profits</h1>
-      </header>
-
       {/* Stats Summary */}
       <div className="stats-container">
         <div className="stat-box">

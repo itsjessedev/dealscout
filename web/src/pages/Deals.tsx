@@ -131,10 +131,6 @@ export default function Deals() {
 
   return (
     <div className="deals-page">
-      <header className="page-header">
-        <h1>Deals</h1>
-      </header>
-
       {/* Needs Review Section */}
       {needsReview.length > 0 && (
         <div className="needs-review-section">
