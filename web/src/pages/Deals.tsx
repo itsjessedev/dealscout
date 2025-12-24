@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 import type { Deal } from '../services/api'
@@ -17,8 +17,10 @@ export default function Deals() {
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<FilterTab>('good')
   const knownDealIds = useRef<Set<number>>(new Set())
+  const isInitialLoad = useRef(true)
 
-  const loadDeals = useCallback(async (isPolling = false) => {
+  // Load deals function
+  const loadDeals = async (isPolling = false) => {
     try {
       if (!isPolling) setLoading(true)
       let params: any = {}
@@ -31,8 +33,8 @@ export default function Deals() {
 
       const data = await api.getDeals(params)
 
-      // Check for new deals (only on polling, not initial load)
-      if (isPolling && knownDealIds.current.size > 0) {
+      // Check for new deals (only on polling after initial load)
+      if (isPolling && !isInitialLoad.current) {
         const newDeals = data.filter(deal => !knownDealIds.current.has(deal.id))
         newDeals.forEach(deal => {
           showDealNotification(deal.title, deal.estimated_profit ?? undefined)
@@ -41,20 +43,23 @@ export default function Deals() {
 
       // Update known deal IDs
       knownDealIds.current = new Set(data.map(d => d.id))
+      isInitialLoad.current = false
       setDeals(data)
+      setError(null)
     } catch (err) {
       if (!isPolling) setError('Failed to load deals')
       console.error(err)
     } finally {
       if (!isPolling) setLoading(false)
     }
-  }, [activeTab, showDealNotification])
+  }
 
   // Initial load and tab change
   useEffect(() => {
-    knownDealIds.current.clear() // Reset known IDs on tab change
+    isInitialLoad.current = true
+    knownDealIds.current.clear()
     loadDeals()
-  }, [loadDeals])
+  }, [activeTab])
 
   // Polling for new deals
   useEffect(() => {
@@ -63,7 +68,7 @@ export default function Deals() {
     }, POLL_INTERVAL)
 
     return () => clearInterval(interval)
-  }, [loadDeals])
+  }, [activeTab])
 
   const formatPrice = (price: number | null) => {
     if (price === null) return '—'
