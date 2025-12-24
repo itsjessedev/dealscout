@@ -27,6 +27,7 @@ class Settings(BaseSettings):
     ebay_dev_id: str = ""
     ebay_redirect_uri: str = "https://dealscout.junipr.io/api/ebay/callback"
     ebay_ru_name: str = ""  # eBay RuName for OAuth
+    ebay_sandbox: bool = False  # Use sandbox API for testing
 
     # Firebase
     firebase_credentials_file: str = "firebase-service-account.json"

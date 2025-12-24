@@ -14,10 +14,35 @@ from ..models import EbayCredentials
 
 settings = get_settings()
 
-# eBay OAuth endpoints
-EBAY_AUTH_URL = "https://auth.ebay.com/oauth2/authorize"
-EBAY_TOKEN_URL = "https://api.ebay.com/identity/v1/oauth2/token"
-EBAY_ACCOUNT_API = "https://api.ebay.com/sell/account/v1"
+
+def get_ebay_base_urls() -> dict:
+    """Get eBay API base URLs based on sandbox setting."""
+    if settings.ebay_sandbox:
+        return {
+            "auth": "https://auth.sandbox.ebay.com/oauth2/authorize",
+            "token": "https://api.sandbox.ebay.com/identity/v1/oauth2/token",
+            "account": "https://apiz.sandbox.ebay.com/sell/account/v1",
+            "identity": "https://apiz.sandbox.ebay.com/commerce/identity/v1",
+            "fulfillment": "https://api.sandbox.ebay.com/sell/fulfillment/v1",
+            "inventory": "https://api.sandbox.ebay.com/sell/inventory/v1",
+            "browse": "https://api.sandbox.ebay.com/buy/browse/v1",
+        }
+    return {
+        "auth": "https://auth.ebay.com/oauth2/authorize",
+        "token": "https://api.ebay.com/identity/v1/oauth2/token",
+        "account": "https://apiz.ebay.com/sell/account/v1",
+        "identity": "https://apiz.ebay.com/commerce/identity/v1",
+        "fulfillment": "https://api.ebay.com/sell/fulfillment/v1",
+        "inventory": "https://api.ebay.com/sell/inventory/v1",
+        "browse": "https://api.ebay.com/buy/browse/v1",
+    }
+
+
+# eBay OAuth endpoints (dynamic based on sandbox setting)
+EBAY_URLS = get_ebay_base_urls()
+EBAY_AUTH_URL = EBAY_URLS["auth"]
+EBAY_TOKEN_URL = EBAY_URLS["token"]
+EBAY_ACCOUNT_API = EBAY_URLS["account"]
 
 # Scopes needed for seller account access and listing creation
 SELLER_SCOPES = [
@@ -155,7 +180,7 @@ async def get_ebay_user_info(access_token: str) -> dict:
     """Get eBay user identity info (username)."""
     async with httpx.AsyncClient() as client:
         response = await client.get(
-            "https://apiz.ebay.com/commerce/identity/v1/user/",
+            f"{EBAY_URLS['identity']}/user/",
             headers={
                 "Authorization": f"Bearer {access_token}",
                 "Content-Type": "application/json",

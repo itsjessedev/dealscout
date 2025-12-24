@@ -7,11 +7,13 @@ from typing import Optional
 import httpx
 
 from ..config import get_settings
+from .ebay_seller import EBAY_URLS
 
 settings = get_settings()
 
-# eBay Browse API endpoint
-EBAY_API_URL = "https://api.ebay.com/buy/browse/v1/item_summary/search"
+# eBay Browse API endpoint (dynamic based on sandbox setting)
+EBAY_API_URL = f"{EBAY_URLS['browse']}/item_summary/search"
+EBAY_TOKEN_URL = EBAY_URLS["token"]
 
 # Simple in-memory cache for successful lookups (reduces API calls)
 _price_cache: dict[str, dict] = {}
@@ -31,7 +33,7 @@ async def get_ebay_access_token() -> Optional[str]:
     try:
         async with httpx.AsyncClient() as client:
             response = await client.post(
-                "https://api.ebay.com/identity/v1/oauth2/token",
+                EBAY_TOKEN_URL,
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
                 },

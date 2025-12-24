@@ -9,9 +9,9 @@ from sqlalchemy import select, and_
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from ..models import Flip, EbayCredentials
-from .ebay_seller import get_valid_access_token, get_fee_for_tier
+from .ebay_seller import get_valid_access_token, get_fee_for_tier, EBAY_URLS
 
-EBAY_FULFILLMENT_API = "https://api.ebay.com/sell/fulfillment/v1"
+EBAY_FULFILLMENT_API = EBAY_URLS["fulfillment"]
 
 
 async def get_recent_orders(access_token: str, days_back: int = 7) -> list[dict]:

@@ -7,11 +7,15 @@ import httpx
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .ebay_seller import get_valid_access_token
+from .ebay_seller import get_valid_access_token, EBAY_URLS
+from ..config import get_settings
 
-# eBay API endpoints
-EBAY_INVENTORY_API = "https://api.ebay.com/sell/inventory/v1"
-EBAY_MEDIA_API = "https://api.ebay.com/commerce/media/v1_beta"
+settings = get_settings()
+
+# eBay API endpoints (dynamic based on sandbox setting)
+EBAY_INVENTORY_API = EBAY_URLS["inventory"]
+EBAY_MEDIA_API = "https://api.sandbox.ebay.com/commerce/media/v1_beta" if settings.ebay_sandbox else "https://api.ebay.com/commerce/media/v1_beta"
+EBAY_VIEW_URL = "https://sandbox.ebay.com/itm" if settings.ebay_sandbox else "https://www.ebay.com/itm"
 
 # Condition mappings for eBay
 CONDITION_MAP = {
@@ -179,7 +183,7 @@ async def create_ebay_listing(
             "sku": sku,
             "offer_id": offer_id,
             "listing_id": listing_id,
-            "ebay_url": f"https://www.ebay.com/itm/{listing_id}",
+            "ebay_url": f"{EBAY_VIEW_URL}/{listing_id}",
         }
 
 
