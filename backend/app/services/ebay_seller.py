@@ -69,14 +69,17 @@ DEFAULT_FEE = Decimal("13.00")
 
 def get_auth_url() -> str:
     """Generate eBay OAuth authorization URL."""
-    if not settings.ebay_app_id or not settings.ebay_ru_name:
+    app_id = settings.get_ebay_app_id()
+    ru_name = settings.get_ebay_ru_name()
+
+    if not app_id or not ru_name:
         raise ValueError("eBay App ID and RuName must be configured")
 
     scope = " ".join(SELLER_SCOPES)
 
     params = {
-        "client_id": settings.ebay_app_id,
-        "redirect_uri": settings.ebay_ru_name,  # RuName, not the actual URL
+        "client_id": app_id,
+        "redirect_uri": ru_name,  # RuName, not the actual URL
         "response_type": "code",
         "scope": scope,
     }
@@ -87,11 +90,15 @@ def get_auth_url() -> str:
 
 async def exchange_code_for_tokens(code: str) -> dict:
     """Exchange authorization code for access and refresh tokens."""
-    if not settings.ebay_app_id or not settings.ebay_cert_id:
+    app_id = settings.get_ebay_app_id()
+    cert_id = settings.get_ebay_cert_id()
+    ru_name = settings.get_ebay_ru_name()
+
+    if not app_id or not cert_id:
         raise ValueError("eBay credentials not configured")
 
     # Create Basic auth header
-    credentials = f"{settings.ebay_app_id}:{settings.ebay_cert_id}"
+    credentials = f"{app_id}:{cert_id}"
     auth_header = base64.b64encode(credentials.encode()).decode()
 
     async with httpx.AsyncClient() as client:
@@ -104,7 +111,7 @@ async def exchange_code_for_tokens(code: str) -> dict:
             data={
                 "grant_type": "authorization_code",
                 "code": code,
-                "redirect_uri": settings.ebay_ru_name,
+                "redirect_uri": ru_name,
             },
             timeout=30.0,
         )
@@ -119,10 +126,13 @@ async def exchange_code_for_tokens(code: str) -> dict:
 
 async def refresh_access_token(refresh_token: str) -> dict:
     """Refresh an expired access token."""
-    if not settings.ebay_app_id or not settings.ebay_cert_id:
+    app_id = settings.get_ebay_app_id()
+    cert_id = settings.get_ebay_cert_id()
+
+    if not app_id or not cert_id:
         raise ValueError("eBay credentials not configured")
 
-    credentials = f"{settings.ebay_app_id}:{settings.ebay_cert_id}"
+    credentials = f"{app_id}:{cert_id}"
     auth_header = base64.b64encode(credentials.encode()).decode()
 
     async with httpx.AsyncClient() as client:

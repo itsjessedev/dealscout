@@ -26,7 +26,10 @@ async def get_ebay_access_token() -> Optional[str]:
 
     Returns access token or None on error.
     """
-    if not settings.ebay_app_id or not settings.ebay_cert_id:
+    app_id = settings.get_ebay_app_id()
+    cert_id = settings.get_ebay_cert_id()
+
+    if not app_id or not cert_id:
         print("eBay API credentials not configured")
         return None
 
@@ -37,7 +40,7 @@ async def get_ebay_access_token() -> Optional[str]:
                 headers={
                     "Content-Type": "application/x-www-form-urlencoded",
                 },
-                auth=(settings.ebay_app_id, settings.ebay_cert_id),
+                auth=(app_id, cert_id),
                 data={
                     "grant_type": "client_credentials",
                     "scope": "https://api.ebay.com/oauth/api_scope",
