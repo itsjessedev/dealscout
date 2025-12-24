@@ -1,25 +1,26 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { api } from '../services/api'
 import type { Deal } from '../services/api'
+import { useToast } from '../components/Toast'
 import './Deals.css'
 
 type FilterTab = 'good' | 'review' | 'all'
 
+const POLL_INTERVAL = 30000 // 30 seconds
+
 export default function Deals() {
   const navigate = useNavigate()
+  const { showDealNotification } = useToast()
   const [deals, setDeals] = useState<Deal[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [activeTab, setActiveTab] = useState<FilterTab>('good')
+  const knownDealIds = useRef<Set<number>>(new Set())
 
-  useEffect(() => {
-    loadDeals()
-  }, [activeTab])
-
-  const loadDeals = async () => {
+  const loadDeals = useCallback(async (isPolling = false) => {
     try {
-      setLoading(true)
+      if (!isPolling) setLoading(true)
       let params: any = {}
 
       if (activeTab === 'good') {
@@ -29,14 +30,40 @@ export default function Deals() {
       }
 
       const data = await api.getDeals(params)
+
+      // Check for new deals (only on polling, not initial load)
+      if (isPolling && knownDealIds.current.size > 0) {
+        const newDeals = data.filter(deal => !knownDealIds.current.has(deal.id))
+        newDeals.forEach(deal => {
+          showDealNotification(deal.title, deal.estimated_profit ?? undefined)
+        })
+      }
+
+      // Update known deal IDs
+      knownDealIds.current = new Set(data.map(d => d.id))
       setDeals(data)
     } catch (err) {
-      setError('Failed to load deals')
+      if (!isPolling) setError('Failed to load deals')
       console.error(err)
     } finally {
-      setLoading(false)
+      if (!isPolling) setLoading(false)
     }
-  }
+  }, [activeTab, showDealNotification])
+
+  // Initial load and tab change
+  useEffect(() => {
+    knownDealIds.current.clear() // Reset known IDs on tab change
+    loadDeals()
+  }, [loadDeals])
+
+  // Polling for new deals
+  useEffect(() => {
+    const interval = setInterval(() => {
+      loadDeals(true)
+    }, POLL_INTERVAL)
+
+    return () => clearInterval(interval)
+  }, [loadDeals])
 
   const formatPrice = (price: number | null) => {
     if (price === null) return '—'
